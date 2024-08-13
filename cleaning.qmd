@@ -1,0 +1,73 @@
+---
+title: "AIAN Data Cleaning"
+author: "Renato de Angelis"
+format: pdf
+editor: visual
+---
+
+```{r, echo = FALSE}
+setwd("~/Downloads")
+library(dplyr)
+```
+
+Load in the data:
+
+```{r}
+aian_raw = readr::read_csv(
+  file = "clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv",
+  col_types = cols(.default = col_integer(),
+                   histid_1850 = col_character(),
+                   histid_1860 = col_character(),
+                   histid_1870 = col_character(),
+                   histid_1880 = col_character(),
+                   histid_1900 = col_character(),
+                   histid_1910 = col_character(),
+                   histid_1920 = col_character(),
+                   histid_1930 = col_character(),
+                   histid_1940 = col_character(),
+                   histid_pop_1850 = col_character(),
+                   histid_pop_1860 = col_character(),
+                   histid_pop_1870 = col_character(),
+                   histid_pop_1880 = col_character(),
+                   histid_pop_1900 = col_character(),
+                   histid_pop_1910 = col_character(),
+                   histid_pop_1920 = col_character(),
+                   histid_pop_1930 = col_character(),
+                   histid_pop_1940 = col_character())) |>
+  janitor::clean_names()
+```
+
+Deselecting uninformative columns
+
+```{r}
+aian_clean = aian_raw |>
+  select_if(~ !all(is.na(.))) |>
+  select(-starts_with("gqtyped"),
+         -starts_with("birthyr"),
+         -starts_with("raced"),
+         -ends_with("1850"),
+         -ends_with("1860"),
+         -ends_with("1870"),
+         -ends_with("1880"),
+         -occ1950_1900,
+         -occ1950_1910,
+         -occ1950_1920,
+         -occ1950_1930)
+```
+
+Filtering out female and under-25 observations
+
+```{r}
+aian_filtered = aian_clean |>
+  filter(age_1940 >= 25 & age_1940 <= 44,
+         sex_1940 == 1,
+         sex_pop_1940 == 1 | is.na(sex_pop_1940))
+```
+
+Creating 'lifetime occupation' for fathers
+
+```{r}
+
+```
+
+
