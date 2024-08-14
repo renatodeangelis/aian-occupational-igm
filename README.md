@@ -1,2 +1,2 @@
-# Intergenerational Occupational Mobility
-This repository contains the data and code for my project on intergenerational occupational mobility among Native American men.
+# Intergenerational Occupational Mobility of Native Americans
+This repository contains the data and code for my paper on the intergenerational occupational mobility of Native American men.
