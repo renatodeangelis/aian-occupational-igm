@@ -82,24 +82,25 @@ aian_clean = aian_raw |>
   rename(son_occ = occ1950_1940)
 ```
 
-Filtering out female and under-25 observations
+Filtering out female and under-25 observations, only unemployed or NAs
 
 ```{r}
 aian_filtered = aian_clean |>
   filter(age_1940 >= 25 & age_1940 <= 44,
          sex_1940 == 1,
-         sex_pop_1940 == 1 | is.na(sex_pop_1940))
+         sex_pop_1940 == 1 | is.na(sex_pop_1940)) |>
+  filter((!is.na(occ1950_pop_1900) & occ1950_pop_1900 <= 970) | 
+           (!is.na(occ1950_pop_1910) & occ1950_pop_1910 <= 970) | 
+           (!is.na(occ1950_pop_1920) & occ1950_pop_1920 <= 970) | 
+           (!is.na(occ1950_pop_1930) & occ1950_pop_1930 <= 970) | 
+           (!is.na(occ1950_pop_1940) & occ1950_pop_1940 <= 970))
 ```
 
-Creating 'lifetime occupation' for fathers
+Creating 'lifetime occupation' for fathers, i.e. modal occupation in recorded years, 
 
 ```{r}
 aian_mutated = aian_filtered |>
-  filter((!is.na(occ1950_pop_1900) & occ1950_pop_1900 != 999) | 
-           (!is.na(occ1950_pop_1910) & occ1950_pop_1910 != 999) | 
-           (!is.na(occ1950_pop_1920) & occ1950_pop_1920 != 999) | 
-           (!is.na(occ1950_pop_1930) & occ1950_pop_1930 != 999) | 
-           (!is.na(occ1950_pop_1940) & occ1950_pop_1940 != 999))
+  mutate(dad_occ = occ1950_pop_1940)
 ```
 
 
