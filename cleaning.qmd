@@ -6,13 +6,15 @@ editor: visual
 ---
 
 ```{r, echo = FALSE}
-setwd("~/Downloads")
 library(dplyr)
+library(readr)
+library(janitor)
 ```
 
 Load in the data:
 
 ```{r}
+setwd("~/Downloads")
 aian_raw = readr::read_csv(
   file = "clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv",
   col_types = cols(.default = col_integer(),
@@ -96,16 +98,15 @@ aian_filtered = aian_clean |>
            (!is.na(occ1950_pop_1940) & occ1950_pop_1940 <= 970))
 ```
 
-Creating 'lifetime occupation' for fathers, i.e. modal occupation in recorded years, 
+Creating 'lifetime occupation' for fathers, i.e. modal occupation in recorded years,
 
 ```{r}
 aian_mutated = aian_filtered |>
   mutate(dad_occ = occ1950_pop_1940)
 ```
 
-
-
-
-
-
-
+Reading crosswalk files:
+```{r}
+setwd("~/Downloads")
+crosswalk = read_csv("mlp_1940_1950_v1.2.csv")
+```
