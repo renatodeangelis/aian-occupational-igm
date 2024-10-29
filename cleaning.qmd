@@ -84,11 +84,11 @@ aian_clean = aian_raw |>
   rename(son_occ = occ1950_1940)
 ```
 
-Filtering out female and under-25 observations, only unemployed or NAs
+Filtering out female and under-15 observations, only unemployed or NAs
 
 ```{r}
 aian_filtered = aian_clean |>
-  filter(age_1940 >= 25 & age_1940 <= 44,
+  filter(age_1940 >= 15 & age_1940 <= 44,
          sex_1940 == 1,
          sex_pop_1940 == 1 | is.na(sex_pop_1940)) |>
   filter((!is.na(occ1950_pop_1900) & occ1950_pop_1900 <= 970) | 
@@ -98,7 +98,7 @@ aian_filtered = aian_clean |>
            (!is.na(occ1950_pop_1940) & occ1950_pop_1940 <= 970))
 ```
 
-Creating 'lifetime occupation' for fathers, i.e. modal occupation in recorded years,
+Creating 'lifetime occupation' for fathers, i.e. modal occupation in recorded years.
 
 ```{r}
 aian_mutated = aian_filtered |>
@@ -106,6 +106,7 @@ aian_mutated = aian_filtered |>
 ```
 
 Reading crosswalk files:
+
 ```{r}
 setwd("~/Downloads")
 crosswalk = read_csv("mlp_1940_1950_v1.2.csv")
