@@ -1,19 +1,7 @@
----
-title: "AIAN Data Cleaning"
-author: "Renato de Angelis"
-format: pdf
-editor: visual
----
-
-```{r, echo = FALSE}
 library(dplyr)
 library(readr)
 library(janitor)
-```
 
-Load in the data:
-
-```{r}
 setwd("~/Downloads")
 aian_raw = readr::read_csv(
   file = "clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv",
@@ -37,11 +25,7 @@ aian_raw = readr::read_csv(
                    histid_pop_1930 = col_character(),
                    histid_pop_1940 = col_character())) |>
   janitor::clean_names()
-```
 
-Deselecting uninformative columns
-
-```{r}
 aian_clean = aian_raw |>
   select_if(~ !all(is.na(.))) |>
   select(-starts_with("gqtyped"),
@@ -82,11 +66,7 @@ aian_clean = aian_raw |>
          -urban_1920,
          -urban_1930) |>
   rename(son_occ = occ1950_1940)
-```
 
-Filtering out female and under-15 observations, only unemployed or NAs fathers.
-
-```{r}
 aian_filtered = aian_clean |>
   filter(age_1940 >= 15 & age_1940 <= 44,
          sex_1940 == 1,
@@ -96,8 +76,5 @@ aian_filtered = aian_clean |>
            (!is.na(occ1950_pop_1920) & occ1950_pop_1920 <= 970) | 
            (!is.na(occ1950_pop_1930) & occ1950_pop_1930 <= 970) | 
            (!is.na(occ1950_pop_1940) & occ1950_pop_1940 <= 970))
-```
 
-```{r}
 write_csv(aian_filtered, "code/aian_filtered.csv")
-```
