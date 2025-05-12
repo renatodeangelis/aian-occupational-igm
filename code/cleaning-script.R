@@ -1,5 +1,6 @@
 library(dplyr)
 library(readr)
+library(ipumsr)
 
 setwd("~/Downloads")
 aian_raw = readr::read_csv(
@@ -69,11 +70,6 @@ aian_clean = aian_raw |>
 aian_filtered = aian_clean |>
   filter(age_1940 >= 15 & age_1940 <= 44,
          sex_1940 == 1,
-         sex_pop_1940 == 1 | is.na(sex_pop_1940)) |>
-  filter((!is.na(occ1950_pop_1900) & occ1950_pop_1900 <= 970) | 
-           (!is.na(occ1950_pop_1910) & occ1950_pop_1910 <= 970) | 
-           (!is.na(occ1950_pop_1920) & occ1950_pop_1920 <= 970) | 
-           (!is.na(occ1950_pop_1930) & occ1950_pop_1930 <= 970) | 
-           (!is.na(occ1950_pop_1940) & occ1950_pop_1940 <= 970))
+         !(sex_pop_1940 == 2))
 
-write_csv(aian_filtered, "code/aian_filtered.csv")
+write_csv(aian_filtered, "aian_filtered.csv")
