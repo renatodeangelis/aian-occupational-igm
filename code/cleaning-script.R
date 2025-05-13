@@ -1,8 +1,11 @@
 library(dplyr)
 library(readr)
-library(ipumsr)
+library(stringr)
+library(tidyr)
+library(tibble)
 
 setwd("~/Downloads")
+
 aian_raw = readr::read_csv(
   file = "clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv",
   col_types = cols(.default = col_integer(),
@@ -67,9 +70,62 @@ aian_clean = aian_raw |>
          -urban_1930) |>
   rename(son_occ = occ1950_1940)
 
+modal_occ = aian_clean |>
+  pivot_longer(
+    cols = starts_with("modal_occ_pop_"),
+    names_to = "year",
+    values_to = "occ",
+    values_drop_na = TRUE) |>
+  group_by(histid_pop_1940, occ) |>
+  summarise(freq = n(), .groups = "drop") |>
+  group_by(histid_pop_1940) |>
+  filter(freq == max(freq)) |>
+  left_join(
+    data |>
+      pivot_longer(
+        cols = starts_with("modal_occ_pop_"),
+        names_to = "year",
+        values_to = "occ",
+        values_drop_na = TRUE) |>
+      mutate(year_num = str_extract(year, "\\d{4}") |> as.integer()),
+    by = c("histid_pop_1940", "occ")) |>
+  group_by(histid_pop_1940) |>
+  slice_min(year_num, n = 1, with_ties = FALSE) |>
+  ungroup() |>
+  select(histid_pop_1940, modal_occ = occ)
+
 aian_filtered = aian_clean |>
-  filter(age_1940 >= 15 & age_1940 <= 44,
+  filter(age_1940 >= 20 & age_1940 <= 40,
          sex_1940 == 1,
-         !(sex_pop_1940 == 2))
+         !(sex_pop_1940 == 2)) |>
+  left_join(modal_occ, by = "histid_pop_1940") |>
+  mutate(dad_meso = case_when(
+    modal_occ == 100 | modal_occ == 123 ~ "farming",
+    modal_occ <= 99 | (modal_occ >= 200 & modal_occ <= 290) ~ "prof",
+    modal_occ >= 300 & modal_occ <= 490 ~ "clerical",
+    (modal_occ >= 500 & modal_occ <= 594) | modal_occ == 762 |
+      modal_occ == 773 | modal_occ == 781 | modal_occ == 782 ~ "crafts",
+    modal_occ >= 595 & modal_occ <= 970 & modal_occ != 762 &
+      modal_occ != 773 & modal_occ != 781 & modal_occ != 782 ~ "unskilled",
+    modal_occ > 970 ~ "unemp")) |>
+  mutate(dad_macro = case_when(
+    dad_meso == "farming" ~ "farming",
+    dad_meso == "prof" | dad_meso == "clerical" ~ "white_col",
+    dad_meso == "crafts" | dad_meso == "unskilled" ~ "blue_col",
+    dad_meso == "unemp" ~ "unemp")) |>
+  mutate(son_meso = case_when(
+    son_occ == 100 | son_occ == 123 ~ "farming",
+    son_occ <= 99 | (son_occ >= 200 & son_occ <= 290) ~ "prof",
+    son_occ >= 300 & son_occ <= 490 ~ "clerical",
+    (son_occ >= 500 & son_occ <= 594) | son_occ == 762 |
+      son_occ == 773 | son_occ == 781 | son_occ == 782 ~ "crafts",
+    son_occ >= 595 & son_occ <= 970 & son_occ != 762 &
+      son_occ != 773 & son_occ != 781 & son_occ != 782 ~ "unskilled",
+    son_occ > 970 ~ "unemp")) |>
+  mutate(son_macro = case_when(
+    son_meso == "farming" ~ "farming",
+    son_meso == "prof" | son_meso == "clerical" ~ "white_col",
+    son_meso == "crafts" | son_meso == "unskilled" ~ "blue_col",
+    son_meso == "unemp" ~ "unemp"))
 
 write_csv(aian_filtered, "aian_filtered.csv")
