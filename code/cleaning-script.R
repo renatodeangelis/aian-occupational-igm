@@ -131,11 +131,17 @@ res_20 = st_read("res_1920_shp/cb_2018_us_aiannh_500k.shp")
 res = st_transform(res_20, 5070)
 cty = st_transform(cty_40, 5070) |>
   mutate(state_icp = as.integer(ICPSRST),
-         county_icp = as.integer(ICPSRCTY))
+         countyicp_1940 = as.integer(ICPSRCTY))
 
 overlap = st_intersection(cty, res) |>
   st_drop_geometry() |>
   distinct(state_icp, county_icp) |>
   arrange(state_icp, county_icp)
+
+aian_res = aian_filtered |>
+  mutate(stateicp_1940 = statefip_1940) |>
+  left_join(overlap |> mutate(res_cty = 1),
+            by = c("stateicp_1940, countyicp_1940")) |>
+  mutate(res_cty = replace_na(res_cty, 0))
 
 write_csv(aian_filtered, "aian_filtered.csv")
