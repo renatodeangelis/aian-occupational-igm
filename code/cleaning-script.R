@@ -3,6 +3,7 @@ library(readr)
 library(stringr)
 library(tidyr)
 library(tibble)
+library(sf)
 
 setwd("~/Downloads")
 
@@ -68,36 +69,29 @@ aian_clean = aian_raw |>
          -urban_1910,
          -urban_1920,
          -urban_1930) |>
-  rename(son_occ = occ1950_1940)
+  rename(son_occ = occ1950_1940) |>
+  filter(age_1940 >= 20 & age_1940 <= 40,
+         sex_1940 == 1,
+         !(sex_pop_1940 == 2))
 
 modal_occ = aian_clean |>
   pivot_longer(
-    cols = starts_with("modal_occ_pop_"),
+    cols = starts_with("occ1950_pop_"),
     names_to = "year",
     values_to = "occ",
     values_drop_na = TRUE) |>
+  mutate(year_num = as.integer(str_extract(year, "\\d{4}"))) |>
   group_by(histid_pop_1940, occ) |>
-  summarise(freq = n(), .groups = "drop") |>
+  summarise(freq = n(),
+            first_year = min(year_num),
+            .groups = "drop") |>
   group_by(histid_pop_1940) |>
   filter(freq == max(freq)) |>
-  left_join(
-    data |>
-      pivot_longer(
-        cols = starts_with("modal_occ_pop_"),
-        names_to = "year",
-        values_to = "occ",
-        values_drop_na = TRUE) |>
-      mutate(year_num = str_extract(year, "\\d{4}") |> as.integer()),
-    by = c("histid_pop_1940", "occ")) |>
-  group_by(histid_pop_1940) |>
-  slice_min(year_num, n = 1, with_ties = FALSE) |>
+  slice_min(first_year, n = 1, with_ties = FALSE) |>
   ungroup() |>
   select(histid_pop_1940, modal_occ = occ)
 
 aian_filtered = aian_clean |>
-  filter(age_1940 >= 20 & age_1940 <= 40,
-         sex_1940 == 1,
-         !(sex_pop_1940 == 2)) |>
   left_join(modal_occ, by = "histid_pop_1940") |>
   mutate(dad_meso = case_when(
     modal_occ == 100 | modal_occ == 123 ~ "farming",
@@ -127,5 +121,8 @@ aian_filtered = aian_clean |>
     son_meso == "prof" | son_meso == "clerical" ~ "white_col",
     son_meso == "crafts" | son_meso == "unskilled" ~ "blue_col",
     son_meso == "unemp" ~ "unemp"))
+
+cty_40 = st_read("nhgis0002_shapefile_tl2000_us_county_1940.zip")
+res_20 = st_read("cb_2018_us_aiannh_500k.zip")
 
 write_csv(aian_filtered, "aian_filtered.csv")
