@@ -122,7 +122,20 @@ aian_filtered = aian_clean |>
     son_meso == "crafts" | son_meso == "unskilled" ~ "blue_col",
     son_meso == "unemp" ~ "unemp"))
 
-cty_40 = st_read("nhgis0002_shapefile_tl2000_us_county_1940.zip")
-res_20 = st_read("cb_2018_us_aiannh_500k.zip")
+unzip("nhgis0002_shapefile_tl2000_us_county_1940.zip", exdir = "cty_1940_shp")
+unzip("cb_2018_us_aiannh_500k.zip", exdir = "res_1920_shp")
+
+cty_40 = st_read("cty_1940_shp/US_county_1940.shp")
+res_20 = st_read("res_1920_shp/cb_2018_us_aiannh_500k.shp")
+
+res = st_transform(res_20, 5070)
+cty = st_transform(cty_40, 5070) |>
+  mutate(state_icp = as.integer(ICPSRST),
+         county_icp = as.integer(ICPSRCTY))
+
+overlap = st_intersection(cty, res) |>
+  st_drop_geometry() |>
+  distinct(state_icp, county_icp) |>
+  arrange(state_icp, county_icp)
 
 write_csv(aian_filtered, "aian_filtered.csv")
