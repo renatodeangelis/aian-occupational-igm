@@ -131,17 +131,72 @@ res_20 = st_read("res_1920_shp/cb_2018_us_aiannh_500k.shp")
 res = st_transform(res_20, 5070)
 cty = st_transform(cty_40, 5070) |>
   mutate(state_icp = as.integer(ICPSRST),
-         countyicp_1940 = as.integer(ICPSRCTY))
+         county_icp = as.integer(ICPSRCTY))
 
 overlap = st_intersection(cty, res) |>
   st_drop_geometry() |>
   distinct(state_icp, county_icp) |>
-  arrange(state_icp, county_icp)
+  arrange(state_icp, county_icp) |>
+  mutate(res_cty = 1)
 
 aian_res = aian_filtered |>
-  mutate(stateicp_1940 = statefip_1940) |>
-  left_join(overlap |> mutate(res_cty = 1),
-            by = c("stateicp_1940, countyicp_1940")) |>
+  mutate(state_icp = case_when(
+    statefip_1940 == 1  ~ 41,    # Alabama
+    statefip_1940 == 2  ~ 81,   # Alaska
+    statefip_1940 == 4  ~ 61,    # Arizona
+    statefip_1940 == 5  ~ 42,    # Arkansas
+    statefip_1940 == 6  ~ 71,    # California
+    statefip_1940 == 8  ~ 62,    # Colorado
+    statefip_1940 == 9  ~ 1,    # Connecticut
+    statefip_1940 == 10 ~ 11,    # Delaware
+    statefip_1940 == 11 ~ 8,    # DC
+    statefip_1940 == 12 ~ 43,    # Florida
+    statefip_1940 == 13 ~ 44,   # Georgia
+    statefip_1940 == 15 ~ 82,   # Hawaii
+    statefip_1940 == 16 ~ 63,   # Idaho
+    statefip_1940 == 17 ~ 21,   # Illinois
+    statefip_1940 == 18 ~ 22,   # Indiana
+    statefip_1940 == 19 ~ 31,   # Iowa
+    statefip_1940 == 20 ~ 32,   # Kansas
+    statefip_1940 == 21 ~ 51,   # Kentucky
+    statefip_1940 == 22 ~ 45,   # Louisiana
+    statefip_1940 == 23 ~ 2,   # Maine
+    statefip_1940 == 24 ~ 52,   # Maryland
+    statefip_1940 == 25 ~ 3,   # Massachusetts
+    statefip_1940 == 26 ~ 23,   # Michigan
+    statefip_1940 == 27 ~ 33,   # Minnesota
+    statefip_1940 == 28 ~ 46,   # Mississippi
+    statefip_1940 == 29 ~ 34,   # Missouri
+    statefip_1940 == 30 ~ 64,   # Montana
+    statefip_1940 == 31 ~ 35,   # Nebraska
+    statefip_1940 == 32 ~ 65,   # Nevada
+    statefip_1940 == 33 ~ 4,   # New Hampshire
+    statefip_1940 == 34 ~ 12,   # New Jersey
+    statefip_1940 == 35 ~ 66,   # New Mexico
+    statefip_1940 == 36 ~ 13,   # New York
+    statefip_1940 == 37 ~ 47,   # North Carolina
+    statefip_1940 == 38 ~ 36,   # North Dakota
+    statefip_1940 == 39 ~ 24,   # Ohio
+    statefip_1940 == 40 ~ 53,   # Oklahoma
+    statefip_1940 == 41 ~ 72,   # Oregon
+    statefip_1940 == 42 ~ 14,   # Pennsylvania
+    statefip_1940 == 44 ~ 5,   # Rhode Island
+    statefip_1940 == 45 ~ 48,   # South Carolina
+    statefip_1940 == 46 ~ 37,   # South Dakota
+    statefip_1940 == 47 ~ 54,   # Tennessee
+    statefip_1940 == 48 ~ 49,   # Texas
+    statefip_1940 == 49 ~ 67,   # Utah
+    statefip_1940 == 50 ~ 6,   # Vermont
+    statefip_1940 == 51 ~ 40,   # Virginia
+    statefip_1940 == 53 ~ 73,   # Washington
+    statefip_1940 == 54 ~ 56,   # West Virginia
+    statefip_1940 == 55 ~ 25,   # Wisconsin
+    statefip_1940 == 56 ~ 68,   # Wyoming
+    TRUE ~ NA_real_)) |>
+  rename("county_icp" = "countyicp_1940") |>
+  left_join(overlap, by = c("state_icp", "county_icp")) |>
   mutate(res_cty = replace_na(res_cty, 0))
 
-write_csv(aian_filtered, "aian_filtered.csv")
+setwd("~/")
+
+write_csv(aian_filtered, "aian-igm/data/aian_filtered.csv")
