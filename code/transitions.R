@@ -4,7 +4,7 @@ library(tidyr)
 library(stringr)
 library(tibble)
 
-data = read_csv("data/aian_filtered.csv")
+data = read_csv("aian-igm/data/aian_filtered.csv")
 
 transition_df <- data_occ |>
   count(dad_macro, son_macro, name = "n") |>            # count father→son dyads
@@ -21,8 +21,7 @@ P_mat <- transition_df |>
   select(dad_macro, son_macro, P) |>
   pivot_wider(
     names_from  = son_macro,
-    values_from = P
-  ) |>
+    values_from = P) |>
   column_to_rownames("dad_macro")
 
 # Standard‐error matrix for P
@@ -30,8 +29,7 @@ SE_mat <- transition_df |>
   select(dad_macro, son_macro, se) |>
   pivot_wider(
     names_from  = son_macro,
-    values_from = se
-  ) |>
+    values_from = se) |>
   column_to_rownames("dad_macro")
 
 # Initial distribution π₀
