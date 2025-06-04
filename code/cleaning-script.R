@@ -200,3 +200,4 @@ aian_res = aian_filtered |>
 setwd("~/")
 
 write_csv(aian_filtered, "aian-igm/data/aian_filtered.csv")
+write_csv(overlap, "aian-igm/data/res_counties.csv")
