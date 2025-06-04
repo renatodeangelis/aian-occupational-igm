@@ -149,7 +149,7 @@ aian_res = aian_filtered |>
     statefip_1940 == 8  ~ 62,    # Colorado
     statefip_1940 == 9  ~ 1,    # Connecticut
     statefip_1940 == 10 ~ 11,    # Delaware
-    statefip_1940 == 11 ~ 8,    # DC
+    statefip_1940 == 11 ~ 98,    # DC
     statefip_1940 == 12 ~ 43,    # Florida
     statefip_1940 == 13 ~ 44,   # Georgia
     statefip_1940 == 15 ~ 82,   # Hawaii
@@ -199,5 +199,5 @@ aian_res = aian_filtered |>
 
 setwd("~/")
 
-write_csv(aian_filtered, "aian-igm/data/aian_filtered.csv")
+write_csv(aian_res, "aian-igm/data/aian_filtered.csv")
 write_csv(overlap, "aian-igm/data/res_counties.csv")
