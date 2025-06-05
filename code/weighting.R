@@ -1,9 +1,10 @@
 library(dplyr)
 library(readr)
+library(tidyr)
 library(cobalt)
 
-aian_filtered = read_csv("aian-igm/data/aian_filtered.csv")
-res_counties = read_csv("aian-igm/data/res_counties.csv")
+aian_filtered = read_csv("data/aian_filtered.csv")
+res_counties = read_csv("data/res_counties.csv")
 
 setwd("~/Downloads")
 aian_full = read_csv("usa_00018.csv") |>
