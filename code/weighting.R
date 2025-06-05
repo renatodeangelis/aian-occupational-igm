@@ -3,12 +3,14 @@ library(readr)
 library(tidyr)
 library(cobalt)
 
+setwd("~/aian-igm")
 aian_filtered = read_csv("data/aian_filtered.csv")
 res_counties = read_csv("data/res_counties.csv")
 
 setwd("~/Downloads")
 aian_full = read_csv("usa_00018.csv") |>
   janitor::clean_names() |>
+  filter(age < 40) |>
   mutate(linked = 0) |>
   mutate(occ_meso = case_when(
     occ1950 == 100 | occ1950 == 123 ~ "farming",
@@ -66,25 +68,54 @@ aian_filtered = aian_filtered |>
 
 aian_comb = bind_rows(aian_filtered, aian_full) |>
   mutate(
-    age = as.factor(age),
+    age_group = cut(age, breaks = c(20, 25, 30, 35, 40), right = FALSE),
     res_cty = as.factor(res_cty),
     occ_meso = as.factor(occ_meso),
-    region = as.factor(region)
-  )
+    region = as.factor(region))
 
-model = glm(linked ~ age + occ_meso + region + res_cty,
+sum_linked = sum(aian_ps$linked == 1)
+
+ps_model = glm(linked ~ age_group + occ_meso + region + res_cty,
             data = aian_comb,
             family = binomial)
 
-matched_weighted = aian_comb |>
-  mutate(ps = predict(model, type = "response")) |>
+aian_ps = aian_comb %>%
+  mutate(p_hat = predict(ps_model, newdata =., type = "response")) |>
+  mutate(w_atc = if_else(linked == 1,
+                         (1 - p_hat) / p_hat, NA_real_)) |>
+  mutate(w_atc_norm = if_else(linked == 1,
+                              w_atc * (sum_linked / sum(w_atc[linked == 1])),
+                              NA_real_))
+
+comb_for_bal = aian_ps |>
+  mutate(w_for_nal = if_else(is.na(w_atc_norm), 1, w_atc_norm))
+
+bal.tab(linked ~ age_group + occ_meso + region + res_cty,
+        data = comb_for_bal,
+        weights = comb_for_bal$w_for_nal,
+        estimand = "ATC",
+        un = TRUE)
+
+aian_weighted = aian_ps |>
   filter(linked == 1) |>
-  mutate(ipw = 1 / ps,
-         ipw_norm = ipw / mean(ipw))
+  select(-linked, -(year:histid), -p_hat, -w_atc) |>
+  rename(weight = w_atc_norm)
 
-bal.tab(linked ~ age + occ_meso + region + res_cty,
-        data = aian_comb,
-        weights = matched_weighted$ipw_norm,
-        estimate = "ATE")
+setwd("~/aian-igm/data")
+write_csv(aian_weighted, "aian_weighted.csv")
 
-write_csv(aian_weighted, "aian-igm/data/aian_weighted.csv")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
