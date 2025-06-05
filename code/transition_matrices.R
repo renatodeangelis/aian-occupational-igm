@@ -4,7 +4,7 @@ library(tidyr)
 library(stringr)
 library(tibble)
 
-data = read_csv("aian-igm/data/aian_filtered.csv")
+data = read_csv("aian_filtered.csv")
 
 transition_df <- data_occ |>
   count(dad_macro, son_macro, name = "n") |>            # count father→son dyads
