@@ -98,8 +98,8 @@ bal.tab(linked ~ age_group + occ_meso + region + res_cty,
 
 aian_weighted = aian_ps |>
   filter(linked == 1) |>
-  select(-linked, -(year:histid), -p_hat, -w_atc) |>
-  rename(weight = w_atc_norm)
+  select(-linked, -(year:histid), -p_hat) |>
+  rename(weight = w_atc)
 
 setwd("~/aian-igm/data")
 write_csv(aian_weighted, "aian_weighted.csv")

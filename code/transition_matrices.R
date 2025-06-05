@@ -1,50 +1,65 @@
 library(dplyr)
 library(readr)
 library(tidyr)
-library(stringr)
 library(tibble)
 
-data = read_csv("aian_filtered.csv")
-
-transition_df <- data_occ |>
-  count(dad_macro, son_macro, name = "n") |>            # count father→son dyads
-  group_by(dad_macro) |>
+macro_order = c("farming", "blue_col", "white_col", "unemp")
+meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
+data = read_csv("aian_weighted.csv") |>
   mutate(
-    n_i      = sum(n),                                  # total dyads for dad_macro = i
-    P        = n / n_i,                                 # transition probability P[i,j]
-    se       = sqrt(P * (1 - P) / n_i)                  # approx. SE under binomial
-  ) |>
-  ungroup()
+    dad_macro = factor(dad_macro, levels = macro_order),
+    occ_macro = factor(occ_macro, levels = macro_order),
+    dad_meso = factor(dad_meso, levels = meso_order),
+    occ_meso = factor(occ_meso, levels = meso_order))
 
-# Transition matrix P
-P_mat <- transition_df |>
-  select(dad_macro, son_macro, P) |>
-  pivot_wider(
-    names_from  = son_macro,
-    values_from = P) |>
-  column_to_rownames("dad_macro")
+pi_0 = function(data, level) {
+  df = data |> 
+    group_by(across(all_of(level))) |>
+    summarise(total_w = sum(weight),
+                         .groups = "drop") |>
+    mutate(pi0 = total_w / sum(total_w)) |>
+    arrange(across(all_of(level)))
+  
+  pi0_vec = df$pi0
+  names(pi0_vec) = df[[level]]
+  return(pi0_vec)
+}
 
-# Standard‐error matrix for P
-SE_mat <- transition_df |>
-  select(dad_macro, son_macro, se) |>
-  pivot_wider(
-    names_from  = son_macro,
-    values_from = se) |>
-  column_to_rownames("dad_macro")
+p_matrix = function(data, level_dad, level_son) {
+  transition_df = data |>
+    group_by({{ level_dad }}, {{ level_son }}) |>
+    summarise(
+      n_w = sum(weight),
+      .groups = "drop"
+    ) |>
+    group_by({{ level_dad }}) |>
+    mutate(
+      n_i_w = sum(n_w),
+      P     = n_w / n_i_w
+    ) |>
+    ungroup()
+  
+  p_mat = transition_df |>
+    select({{ level_dad }}, {{ level_son }}, P) |>
+    pivot_wider(
+      names_from  = {{ level_son }},
+      values_from = P
+    ) |>
+    column_to_rownames(var = rlang::as_string(rlang::enexpr(level_dad)))
+  
+  as.matrix(p_mat)
+}
 
-# Initial distribution π₀
-pi0 <- data_occ |>
-  count(dad_macro, name = "n") |>
-  mutate(pi0 = n / sum(n)) |>
-  arrange(dad_macro) |>
-  pull(pi0) 
-names(pi0) <- levels(data_occ$dad_macro)
+pi_star = function(p_mat) {
+  P = as.matrix(p_mat)
+  eig = eigen(t(P))
+  idx = which.min(abs(eig$values - 1))
+  v = Re(eig$vectors[, idx])
+  pi_star = v / sum(v)
+  names(pi_star) = rownames(P)
+  return(pi_star)
+}
 
-# Stationary distribution π*
-# Solve π* = π* P  ⇒  π* is left eigenvector of P with eigenvalue 1
-eig <- eigen(t(as.matrix(P_mat)))
-idx <- which.min(abs(eig$values - 1))                # find eigenvalue ≈ 1
-v   <- Re(eig$vectors[, idx])
-pi_star <- v / sum(v)                                 # normalize to sum to 1
-names(pi_star) <- rownames(P_mat)
+
+
 
