@@ -212,7 +212,19 @@ sdm_core = function(pi0, P1, mu0, P2 = P1, t = 1){
   tv_norm(pi0_t, mu0_t)
 }
 
-
+sdm_data = function(data, level_dad, level_son, subgroup_var, g1, g2, t = 1){
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son}}, matrix = FALSE)
+  
+  pi0 = data |>
+    filter({{ subgroup_var }} == g1) |>
+    pi_0({{ level_dad }})
+  
+  mu0 = data |>
+    filter({{ subgroup_var }} == g2) |>
+    pi_0({{ level_dad }})
+  
+  sdm_core(pi0, P_mat, mu0, P_mat, t = t)
+}
 
 
 
