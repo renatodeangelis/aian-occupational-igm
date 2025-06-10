@@ -4,6 +4,8 @@ library(tidyr)
 library(tibble)
 library(ggplot2)
 library(patchwork)
+library(expm)
+library(rlang)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
@@ -13,6 +15,10 @@ data = read_csv("aian_weighted.csv") |>
     occ_macro = factor(occ_macro, levels = macro_order),
     dad_meso = factor(dad_meso, levels = meso_order),
     occ_meso = factor(occ_meso, levels = meso_order))
+
+################################################################################
+############################### BASIC MEASURES #################################
+################################################################################
 
 pi_0 = function(data, level) {
   df = data |> 
@@ -28,28 +34,28 @@ pi_0 = function(data, level) {
 }
 
 p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
-  transition_df = data |>
+  dad_nm = as_name(ensym(level_dad))
+  son_nm = as_name(ensym(level_son))
+  
+  df = data |>
     group_by({{ level_dad }}, {{ level_son }}) |>
-    summarise(
-      n_w = sum(weight),
-      .groups = "drop"
-    ) |>
+    summarise(n_w = sum(weight), .groups = "drop") |>
     group_by({{ level_dad }}) |>
     mutate(
       n_i_w = sum(n_w),
-      P     = n_w / n_i_w
-    ) |>
+      P = n_w / n_i_w) |>
     ungroup()
   
-  p_mat = transition_df |>
-    select({{ level_dad }}, {{ level_son }}, P) |>
+  wide = df |>
+    select(all_of(c(dad_nm, son_nm, "P"))) |>
     pivot_wider(
-      names_from  = {{ level_son }},
-      values_from = P
-    ) |>
-    column_to_rownames(var = rlang::as_string(rlang::enexpr(level_dad)))
+      names_from = all_of(son_nm),
+      values_from = P)
   
-  ifelse(matrix == TRUE, return(transition_df), return(p_mat))
+  mat = as.matrix(wide[-1])
+  rownames(mat) = wide[[dad_nm]]
+  
+  ifelse(matrix == TRUE, return(mat), return(df))
 }
 
 pi_star = function(p_mat) {
@@ -62,7 +68,7 @@ pi_star = function(p_mat) {
   return(pi_star)
 }
 
-p_mat = p_matrix(data, dad_meso, occ_meso)
+p_mat = p_matrix(data, dad_meso, occ_meso, matrix = FALSE)
 g = ggplot(
   p_mat |> 
     mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
@@ -106,7 +112,6 @@ g0 = ggplot(df_pi0, aes(x = 1, y = father, fill = pi0)) +
         legend.position = "none",
         plot.title = element_text(hjust = 0.5))
 
-
 steady = pi_star(p_matrix(data, dad_meso, occ_meso, FALSE))
 df_pi_star = tibble(
   father = names(steady),
@@ -130,6 +135,96 @@ g_star = ggplot(df_pi_star, aes(x = 1, y = father, fill = pi_star)) +
         plot.title = element_text(hjust = 0.5))
 
 combined_plot = g + g0 + g_star + plot_layout(widths = c(6, 1, 1))
+
+################################################################################
+############################## ADVANCED MEASURES ###############################
+################################################################################
+
+tv_norm = function(mu, nu){
+  0.5 * sum(abs(mu - nu))
+}
+
+d_t = function(data, level_dad, level_son, t = 1){
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_star = pi_star(P_mat)
+  
+  P_t = P_mat %^% t
+  
+  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_star))
+  
+  log(max(d_i))
+}
+
+d_prime = function(data, level_dad, level_son, t = 1){
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  
+  P_t = P_mat %^% t
+  
+  n = nrow(P_t)
+  
+  pairs = combn(n, 2)
+  dvals = apply(pairs, 2, function(idx) {
+    i = idx[1]; j = idx[2]
+    tv_norm(P_t[i, ], P_t[j, ])
+  })
+  
+  log(max(dvals))
+}
+
+am = function(data, level_dad, level_son, t = 1){
+  pi_0 = pi_0(data, {{ level_dad }})
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_star = pi_star(P_mat)
+  
+  P_t = P_mat %^% t
+  
+  pi_t = as.numeric(pi_0 %*% P_t)
+  
+  am = tv_norm(pi_t, pi_star)
+  
+  log(am)
+}
+
+im = function(data, level_dad, level_son, t = 1){
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_star = pi_star(P_mat)
+  
+  P_t = P_mat %^% t
+  
+  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_star))
+  
+  log(im_i)
+}
+
+aim = function(data, level_dad, level_son, t = 1){
+  imv = im(data, {{ level_dad }}, {{ level_son}}, t = t)
+  pi0 = pi_0(data, {{ level_dad }})
+  sum(imv * pi0[names(imv)])
+}
+
+sdm_core = function(pi0, P1, mu0, P2 = P1, t = 1){
+  P_t_pi = P1 %^% t
+  P_t_mu = P2 %^% t
+  
+  pi0_t = as.numeric(pi0 %*% P_t_pi)
+  mu0_t = as.numeric(mu0 %*% P_t_mu)
+  
+  tv_norm(pi0_t, mu0_t)
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
