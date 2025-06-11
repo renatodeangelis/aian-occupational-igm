@@ -9,7 +9,7 @@ library(rlang)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
-data = read_csv("aian_weighted.csv") |>
+data = read_csv("data/aian_weighted.csv") |>
   mutate(
     dad_macro = factor(dad_macro, levels = macro_order),
     occ_macro = factor(occ_macro, levels = macro_order),
@@ -68,73 +68,6 @@ pi_star = function(p_mat) {
   return(pi_star)
 }
 
-p_mat = p_matrix(data, dad_meso, occ_meso, matrix = FALSE)
-g = ggplot(
-  p_mat |> 
-    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
-  aes(x = occ_meso, y = dad_meso, fill = P)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", P)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(x = "Son occupation",
-       y = "Father occupation",
-       fill = "Transition Prob.",
-       title = "P") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title = element_text(size = 10),
-        legend.position = "bottom",
-        plot.title = element_text(hjust = 0.5))
-
-pi0_vec = pi_0(data, dad_meso)
-df_pi0 = tibble(
-  father = names(pi0_vec),
-  pi0 = as.numeric(pi0_vec)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-
-g0 = ggplot(df_pi0, aes(x = 1, y = father, fill = pi0)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi0)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π_0") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-steady = pi_star(p_matrix(data, dad_meso, occ_meso, FALSE))
-df_pi_star = tibble(
-  father = names(steady),
-  pi_star = as.numeric(steady)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-
-g_star = ggplot(df_pi_star, aes(x = 1, y = father, fill = pi_star)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π*") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-combined_plot = g + g0 + g_star + plot_layout(widths = c(6, 1, 1))
 
 ################################################################################
 ############################## ADVANCED MEASURES ###############################
@@ -226,17 +159,429 @@ sdm_data = function(data, level_dad, level_son, subgroup_var, g1, g2, t = 1){
   sdm_core(pi0, P_mat, mu0, P_mat, t = t)
 }
 
+################################################################################
+############################### IMPLEMENTATION #################################
+################################################################################
 
+## OVERALL TRANSITIONS (MACRO)
 
+p_mat = p_matrix(data, dad_macro, occ_macro, matrix = FALSE)
+g = ggplot(
+  p_mat |> 
+    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
+  aes(x = occ_macro, y = dad_macro, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
 
+pi0_vec = pi_0(data, dad_macro)
+df_pi0 = tibble(
+  father = names(pi0_vec),
+  pi0 = as.numeric(pi0_vec)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0 = ggplot(df_pi0, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
+steady = pi_star(p_matrix(data, dad_macro, occ_macro, TRUE))
+df_pi_star = tibble(
+  father = names(steady),
+  pi_star = as.numeric(steady)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star = ggplot(df_pi_star, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
+combined_plot = g + g0 + g_star + plot_layout(widths = c(6, 1, 1))
 
+## RESERVATION ONLY
 
+res = data |> filter(res_cty == 1 & statefip_1940 != 40)
 
+p_mat_res = p_matrix(res, dad_macro, occ_macro, matrix = FALSE)
+g_res = ggplot(
+  p_mat_res |> 
+    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
+  aes(x = occ_macro, y = dad_macro, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
 
+pi0_vec_res = pi_0(res, dad_macro)
+df_pi0_res = tibble(
+  father = names(pi0_vec_res),
+  pi0 = as.numeric(pi0_vec_res)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_res = ggplot(df_pi0_res, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
+steady_res = pi_star(p_matrix(res, dad_macro, occ_macro, TRUE))
+df_pi_star_res = tibble(
+  father = names(steady_res),
+  pi_star = as.numeric(steady_res)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_res = ggplot(df_pi_star_res, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
+combined_plot_res = g_res + g0_res + g_star_res + plot_layout(widths = c(6, 1, 1))
+
+## NONRESERVATION ONLY
+
+nonres = data |> filter(res_cty == 0 | statefip_1940 == 40)
+
+p_mat_nonres = p_matrix(nonres, dad_macro, occ_macro, matrix = FALSE)
+g_nonres = ggplot(
+  p_mat_nonres |> 
+    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
+  aes(x = occ_macro, y = dad_macro, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec_nonres = pi_0(nonres, dad_macro)
+df_pi0_nonres = tibble(
+  father = names(pi0_vec_nonres),
+  pi0 = as.numeric(pi0_vec_nonres)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_nonres = ggplot(df_pi0_nonres, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady_nonres = pi_star(p_matrix(nonres, dad_macro, occ_macro, TRUE))
+df_pi_star_nonres = tibble(
+  father = names(steady_nonres),
+  pi_star = as.numeric(steady_nonres)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
+  plot_layout(widths = c(6, 1, 1))
+
+## OVERALL TRANSITIONS (MESO)
+
+p_mat = p_matrix(data, dad_meso, occ_meso, matrix = FALSE)
+g = ggplot(
+  p_mat |> 
+    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
+  aes(x = occ_meso, y = dad_meso, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec = pi_0(data, dad_meso)
+df_pi0 = tibble(
+  father = names(pi0_vec),
+  pi0 = as.numeric(pi0_vec)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0 = ggplot(df_pi0, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady = pi_star(p_matrix(data, dad_meso, occ_meso, TRUE))
+df_pi_star = tibble(
+  father = names(steady),
+  pi_star = as.numeric(steady)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star = ggplot(df_pi_star, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot = g + g0 + g_star + plot_layout(widths = c(6, 1, 1))
+
+## RESERVATION ONLY
+
+res = data |> filter(res_cty == 1 & statefip_1940 != 40)
+
+p_mat_res = p_matrix(res, dad_meso, occ_meso, matrix = FALSE)
+g_res = ggplot(
+  p_mat_res |> 
+    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
+  aes(x = occ_meso, y = dad_meso, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec_res = pi_0(res, dad_meso)
+df_pi0_res = tibble(
+  father = names(pi0_vec_res),
+  pi0 = as.numeric(pi0_vec_res)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_res = ggplot(df_pi0_res, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady_res = pi_star(p_matrix(res, dad_meso, occ_meso, TRUE))
+df_pi_star_res = tibble(
+  father = names(steady_res),
+  pi_star = as.numeric(steady_res)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_res = ggplot(df_pi_star_res, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot_res = g_res + g0_res + g_star_res + plot_layout(widths = c(6, 1, 1))
+
+## NONRESERVATION ONLY
+
+nonres = data |> filter(res_cty == 0 | statefip_1940 == 40)
+
+p_mat_nonres = p_matrix(nonres, dad_meso, occ_meso, matrix = FALSE)
+g_nonres = ggplot(
+  p_mat_nonres |> 
+    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
+  aes(x = occ_meso, y = dad_meso, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec_nonres = pi_0(nonres, dad_meso)
+df_pi0_nonres = tibble(
+  father = names(pi0_vec_nonres),
+  pi0 = as.numeric(pi0_vec_nonres)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_nonres = ggplot(df_pi0_nonres, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady_nonres = pi_star(p_matrix(nonres, dad_meso, occ_meso, TRUE))
+df_pi_star_nonres = tibble(
+  father = names(steady_nonres),
+  pi_star = as.numeric(steady_nonres)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
+  plot_layout(widths = c(6, 1, 1))
+
+###############################################################################
 
 
 
