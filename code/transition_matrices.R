@@ -6,6 +6,7 @@ library(ggplot2)
 library(patchwork)
 library(expm)
 library(rlang)
+library(purrr)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
@@ -33,29 +34,45 @@ pi_0 = function(data, level) {
   return(pi0_vec)
 }
 
-p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
-  dad_nm = as_name(ensym(level_dad))
-  son_nm = as_name(ensym(level_son))
+p_matrix <- function(data, level_dad, level_son, matrix = TRUE) {
+  # 1) Capture the columns as symbols
+  dad_sym <- ensym(level_dad)
+  son_sym <- ensym(level_son)
   
-  df = data |>
-    group_by({{ level_dad }}, {{ level_son }}) |>
-    summarise(n_w = sum(weight), .groups = "drop") |>
-    group_by({{ level_dad }}) |>
+  # 2) Get their names as strings
+  dad_nm  <- as_string(dad_sym)
+  son_nm  <- as_string(son_sym)
+  
+  # 3) Build the weighted transition table
+  df <- data %>%
+    group_by( !!dad_sym, !!son_sym ) %>%
+    summarise(
+      n_w = sum(weight),
+      .groups = "drop"
+    ) %>%
+    group_by( !!dad_sym ) %>%
     mutate(
       n_i_w = sum(n_w),
-      P = n_w / n_i_w) |>
+      P     = n_w / n_i_w
+    ) %>%
     ungroup()
   
-  wide = df |>
-    select(all_of(c(dad_nm, son_nm, "P"))) |>
+  # If the user wants the raw df, return that
+  if (!matrix) return(df)
+  
+  # 4) Pivot wide into a matrix
+  wide <- df %>%
+    select( !!dad_sym, !!son_sym, P ) %>%
     pivot_wider(
-      names_from = all_of(son_nm),
-      values_from = P)
+      names_from  = !!son_sym,
+      values_from = P
+    )
   
-  mat = as.matrix(wide[-1])
-  rownames(mat) = wide[[dad_nm]]
+  # 5) Convert to numeric matrix
+  mat <- as.matrix(wide %>% select(-!!dad_sym))
+  rownames(mat) <- pull(wide, !!dad_sym)
   
-  ifelse(matrix == TRUE, return(mat), return(df))
+  mat
 }
 
 pi_star = function(p_mat) {
@@ -72,6 +89,36 @@ pi_star = function(p_mat) {
 ################################################################################
 ############################## ADVANCED MEASURES ###############################
 ################################################################################
+
+with_boot = function(data, stat_fn, R = 200, ...){
+  args_q = enquos(...)
+  N = nrow(data)
+  
+  call_stat = function(d){
+    call_expr = call2(stat_fn, data = d, !!!args_q)
+    eval_tidy(call_expr)
+  }
+  
+  est = call_stat(data)
+  
+  boots = replicate(R, {
+    d_b = data |> slice_sample(n = N, replace = TRUE)
+    call_stat(d_b)
+  }, simplify = FALSE)
+  
+  boots_arr = simplify2array(boots)
+  
+  if (is.atomic(est) && length(est) == 1) {
+    se = sd(boots_arr, na.rm = TRUE)
+  } else if (is.matrix(boots_arr) || (is.array(boots_arr) && length(dim(boots_arr)) == 2)){
+    se = apply(boots_arr, 1, sd, na.rm = TRUE)
+  } else {
+    stop("with_boot(): unsupported output type from stat_fn()")
+  }
+  
+  list(estimate = est,
+       se = se)
+}
 
 tv_norm = function(mu, nu){
   0.5 * sum(abs(mu - nu))
@@ -729,7 +776,47 @@ combined_plot_okl = g_okl + g0_okl + g_star_okl +
 
 ## d(t), d'(t), AIM CURVES
 
+ts = 0:5
+measures = tibble(
+  measure = c("d", "d_prime", "AM"),
+  fn = list(d_t, d_prime, am)
+)
 
+results = expand_grid(
+  t = ts,
+  measures) |>
+  mutate(boot = pmap(list(fn, t),
+                     ~ with_boot(
+                       data,
+                       ..1,
+                       R = 1000,
+                       level_dad = dad_macro,
+                       level_son = occ_macro,
+                       t = ..2))) |>
+  mutate(est = map_dbl(boot, "estimate"),
+         se = map_dbl(boot, "se")) |>
+  select(measure, t, est, se)
+
+write_csv(results, "data/advanced_measures.csv")
+
+ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
+  geom_ribbon(aes(ymin = est - se,
+                  ymax = est + se),
+              alpha = 0.2,
+              linetype = 0) +
+  geom_line(size = 1,
+            linetype = 2) +
+  geom_point(size = 2) +
+  scale_color_brewer("Metric", palette = "Dark2") +
+  scale_fill_brewer("Metric",  palette = "Dark2") +
+  labs(
+    x = "Generation (t)"  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    legend.title    = element_blank(),
+    legend.text     = element_text(size = 12)
+  )
 
 ## SDM CURVES
 
