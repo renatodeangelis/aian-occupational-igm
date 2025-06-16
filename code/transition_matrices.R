@@ -795,28 +795,51 @@ results = expand_grid(
                        t = ..2))) |>
   mutate(est = map_dbl(boot, "estimate"),
          se = map_dbl(boot, "se")) |>
-  select(measure, t, est, se)
+  select(measure, t, est, se) |>
+  mutate(dt_t = est*t)
 
 write_csv(results, "data/advanced_measures.csv")
 
+results1 = results |>
+  filter(measure == "d_prime") |>
+  mutate(
+    measure = "d_prime_t",
+    est = est * t) %>%
+  bind_rows(results, .) |>
+  arrange(factor(measure, levels = c("d", "d_prime", "d_prime_t", "AM")), t)
+
 ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
-  geom_ribbon(aes(ymin = est - se,
-                  ymax = est + se),
+  geom_ribbon(aes(ymin = est - 1.96*se,
+                  ymax = est + 1.96*se),
               alpha = 0.2,
               linetype = 0) +
-  geom_line(size = 1,
-            linetype = 2) +
-  geom_point(size = 2) +
-  scale_color_brewer("Metric", palette = "Dark2") +
-  scale_fill_brewer("Metric",  palette = "Dark2") +
-  labs(
-    x = "Generation (t)"  ) +
+  geom_line(linetype = 1) +
+  geom_point(size = 1.5) +
+  scale_color_manual(values = c("d" = "black",
+                                "d_prime" = "orange",
+                                "AM" = "blue"),
+                     labels = c(d = expression(log(d(t))),
+                                d_prime = expression(log(d * "'"~(t))),
+                                AM = expression(log(AM(pi[0], t))))) +
+  scale_fill_manual(values = c("d" = "black",
+                               "d_prime" = "orange",
+                               "AM" = "blue"),
+                    labels = c(d = expression(log(d(t))),
+                               d_prime = expression(log(d * "'"~(t))),
+                               AM = expression(log(AM(pi[0], t))))) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  labs(x = "Generation (t)",
+       y = "log of Measure Value") +
   theme_minimal() +
-  theme(
-    legend.position = "bottom",
-    legend.title    = element_blank(),
-    legend.text     = element_text(size = 12)
-  )
+  theme(legend.position = c(0.4, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5))
 
 ## SDM CURVES
 
