@@ -372,6 +372,79 @@ g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)
 combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
   plot_layout(widths = c(6, 1, 1))
 
+## OKLAHOMA ONLY
+
+## NONRESERVATION ONLY
+
+okl = data |> filter(statefip_1940 == 40)
+
+p_mat_okl = p_matrix(okl, dad_macro, occ_macro, matrix = FALSE)
+g_okl = ggplot(
+  p_mat_okl |> 
+    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
+  aes(x = occ_macro, y = dad_macro, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec_okl = pi_0(okl, dad_macro)
+df_pi0_okl = tibble(
+  father = names(pi0_vec_okl),
+  pi0 = as.numeric(pi0_vec_okl)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_okl = ggplot(df_pi0_okl, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady_okl = pi_star(p_matrix(okl, dad_macro, occ_macro, TRUE))
+df_pi_star_okl = tibble(
+  father = names(steady_okl),
+  pi_star = as.numeric(steady_okl)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_okl = ggplot(df_pi_star_okl, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot_okl = g_okl + g0_okl + g_star_okl + 
+  plot_layout(widths = c(6, 1, 1))
+
 ## OVERALL TRANSITIONS (MESO)
 
 p_mat = p_matrix(data, dad_meso, occ_meso, matrix = FALSE)
@@ -581,7 +654,82 @@ g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)
 combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
   plot_layout(widths = c(6, 1, 1))
 
-###############################################################################
+## OKLAHOMA ONLY
+
+okl = data |> filter(statefip_1940 == 40)
+
+p_mat_okl = p_matrix(okl, dad_meso, occ_meso, matrix = FALSE)
+g_okl = ggplot(
+  p_mat_okl |> 
+    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
+  aes(x = occ_meso, y = dad_meso, fill = P)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", P)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(x = "Son occupation",
+       y = "Father occupation",
+       fill = "Transition Prob.",
+       title = "P") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title = element_text(size = 10),
+        legend.position = "bottom",
+        plot.title = element_text(hjust = 0.5))
+
+pi0_vec_okl = pi_0(okl, dad_meso)
+df_pi0_okl = tibble(
+  father = names(pi0_vec_okl),
+  pi0 = as.numeric(pi0_vec_okl)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g0_okl = ggplot(df_pi0_okl, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π_0") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+steady_okl = pi_star(p_matrix(okl, dad_meso, occ_meso, TRUE))
+df_pi_star_okl = tibble(
+  father = names(steady_okl),
+  pi_star = as.numeric(steady_okl)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_okl = ggplot(df_pi_star_okl, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
+  scale_fill_gradient(low = "white", high = "steelblue") +
+  labs(title = "π*") +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
+
+combined_plot_okl = g_okl + g0_okl + g_star_okl + 
+  plot_layout(widths = c(6, 1, 1))
+
+################################################################################
+
+## d(t), d'(t), AIM CURVES
 
 
+
+## SDM CURVES
 
