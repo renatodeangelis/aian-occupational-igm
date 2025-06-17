@@ -196,11 +196,11 @@ sdm_variant = function(data,
   
   P_full = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
 
-  da      = data %>% filter({{ subgroup_var }} == g1)
+  da      = data |> filter({{ subgroup_var }} == g1)
   P_a     = p_matrix(da,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
   pi0_a   = pi_0(da,     {{ level_dad }})
   
-  db      = data %>% filter({{ subgroup_var }} == g2)
+  db      = data |> filter({{ subgroup_var }} == g2)
   P_b     = p_matrix(db,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
   pi0_b   = pi_0(db,     {{ level_dad }})
   
@@ -896,7 +896,7 @@ write_csv(results_res, "data/advanced_measures_res.csv")
 
 results_res = read_csv("data/advanced_measures_res.csv")
 
-ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
+plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = est - 1.96*se,
                   ymax = est + 1.96*se),
               alpha = 0.2,
@@ -919,7 +919,7 @@ ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
   labs(x = "Generation (t)",
        y = "log of Measure Value") +
   theme_minimal() +
-  theme(legend.position = c(0.4, 0.05),
+  theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
         legend.direction = "vertical",
         legend.title = element_blank(),
@@ -927,7 +927,8 @@ ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
-        axis.ticks = element_line(size = 0.5))
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-10, 0))
 
 results_nonres = expand_grid(
   t = ts,
@@ -947,7 +948,9 @@ results_nonres = expand_grid(
 
 write_csv(results_nonres, "data/advanced_measures_nonres.csv")
 
-ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
+results_nonres = read_csv("data/advanced_measures_nonres.csv")
+
+plot_nonres = ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = est - 1.96*se,
                   ymax = est + 1.96*se),
               alpha = 0.2,
@@ -970,7 +973,7 @@ ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
   labs(x = "Generation (t)",
        y = "log of Measure Value") +
   theme_minimal() +
-  theme(legend.position = c(0.4, 0.05),
+  theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
         legend.direction = "vertical",
         legend.title = element_blank(),
@@ -978,8 +981,10 @@ ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
-        axis.ticks = element_line(size = 0.5))
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-10, 0))
 
+combined_measures = plot_res + plot_nonres
 
 ## SDM CURVES
 
@@ -1016,12 +1021,10 @@ results_sdm = read_csv("data/sdm_results.csv") |>
   mutate(est = log(est))
 
 ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
-  geom_ribbon(aes(ymin = est - se, ymax = est + se),
+  geom_ribbon(aes(ymin = est - 1.96*se, ymax = est + 1.96*se),
               alpha = 0.2, linetype = 0, show.legend = FALSE) +
-  geom_line(aes(linetype = variant), size = 1.1) +
-  geom_point(size = 2) +
-  
-  # custom color + linetype + label maps
+  geom_line(aes(linetype = variant), size = 1) +
+  geom_point(size = 1.5) +
   scale_color_manual(
     name   = "SDM variant",
     values = c(ab = "darkgreen", full = "steelblue", bb = "darkred"),
@@ -1033,32 +1036,23 @@ ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
   ) +
   scale_linetype_manual(
     name   = "SDM variant",
-    values = c(ab = "solid", full = "dashed", bb = "dotdash"),
+    values = c(ab = "dashed", full = "solid", bb = "solid"),
     labels = c(
       ab   = expression(SDM(t, pi[0]^A, P[A],    pi[0]^B, P[B])),
       full = expression(SDM(t, pi[0]^A, P,       pi[0]^B, P)),
-      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B]))
-    )
-  ) +
-  
+      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B])))) +
   scale_x_continuous(breaks = ts) +
-  labs(
-    x     = "t (generations)",
-    y     = expression(SDM(t)),
-    title = "Subgroup-Difference Memory Curves"
-  ) +
-  theme_classic(base_size = 14) +
-  theme(
-    axis.line    = element_line(size = 1),
-    axis.ticks   = element_line(size = 0.8),
-    axis.text    = element_text(size = 12),
-    axis.title   = element_text(size = 14, face = "bold"),
-    legend.position      = c(0.95, 0.05),
-    legend.justification = c("right","bottom"),
-    legend.direction     = "vertical",
-    legend.background    = element_rect(fill = alpha("white", 0.8)),
-    legend.key.width     = unit(1,"lines"),
-    legend.key.height    = unit(0.8,"lines"),
-    legend.title         = element_text(size = 12),
-    legend.text          = element_text(size = 10)
-  )
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10, -12),
+                     limits = c(-12, 0)) +
+  labs(x = "Generation (t)",
+       y = expression(SDM(t))) +
+  theme_minimal() +
+  theme(legend.position = c(0.4, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5))
