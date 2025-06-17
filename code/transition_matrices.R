@@ -50,7 +50,7 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
     group_by( !!dad_sym ) |>
     mutate(
       n_i_w = sum(n_w),
-      P     = n_w / n_i_w
+      P     = ifelse(n_i_w > 0, n_w / n_i_w, 0) 
     ) |>
     ungroup()
   
@@ -60,7 +60,8 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
     select( !!dad_sym, !!son_sym, P ) |>
     pivot_wider(
       names_from  = !!son_sym,
-      values_from = P
+      values_from = P,
+      values_fill  = list(P = 0)
     )
   
   mat = as.matrix(wide |> select(-!!dad_sym))
@@ -183,21 +184,29 @@ sdm_core = function(pi0, P1, mu0, P2 = P1, t = 1){
   pi0_t = as.numeric(pi0 %*% P_t_pi)
   mu0_t = as.numeric(mu0 %*% P_t_mu)
   
-  tv_norm(pi0_t, mu0_t)
+  log(tv_norm(pi0_t, mu0_t))
 }
 
-sdm_data = function(data, level_dad, level_son, subgroup_var, g1, g2, t = 1){
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son}}, matrix = TRUE)
+sdm_variant = function(data,
+                        level_dad, level_son,
+                        subgroup_var, g1, g2,
+                        t = 1,
+                        variant = c("ab","full","bb")) {
+  variant = match.arg(variant)
   
-  pi0 = data |>
-    filter({{ subgroup_var }} == g1) |>
-    pi_0({{ level_dad }})
+  P_full = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+
+  da      = data %>% filter({{ subgroup_var }} == g1)
+  P_a     = p_matrix(da,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  pi0_a   = pi_0(da,     {{ level_dad }})
   
-  mu0 = data |>
-    filter({{ subgroup_var }} == g2) |>
-    pi_0({{ level_dad }})
+  db      = data %>% filter({{ subgroup_var }} == g2)
+  P_b     = p_matrix(db,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  pi0_b   = pi_0(db,     {{ level_dad }})
   
-  sdm_core(pi0, P_mat, mu0, P_mat, t = t)
+  if(variant=="ab")    return(sdm_core(pi0_a, P_a,   pi0_b, P_b,   t))
+  if(variant=="full")  return(sdm_core(pi0_a, P_full,pi0_b, P_full,t))
+  if(variant=="bb")    return(sdm_core(pi0_a, P_b,   pi0_b, P_b,   t))
 }
 
 id_within = function(data,
@@ -205,8 +214,8 @@ id_within = function(data,
                      subgroup_var, group,
                      j, k,
                      t = 1) {
-  sub = data 
-  filter({{ subgroup_var }} == group)
+  sub = data |>
+    filter({{ subgroup_var }} == group)
   
   P = p_matrix(sub, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
   
@@ -218,7 +227,7 @@ id_within = function(data,
   tv_norm(row_j, row_k)
 }
 
-ID_between = function(data,
+id_between = function(data,
                       level_dad, level_son,
                       subgroup_var, g1, g2,
                       j,
@@ -885,6 +894,8 @@ results_res = expand_grid(
 
 write_csv(results_res, "data/advanced_measures_res.csv")
 
+results_res = read_csv("data/advanced_measures_res.csv")
+
 ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = est - 1.96*se,
                   ymax = est + 1.96*se),
@@ -904,7 +915,7 @@ ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
                     labels = c(d = expression(log(d(t))),
                                d_prime = expression(log(d * "'"~(t))),
                                AM = expression(log(AM(pi[0], t))))) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
   labs(x = "Generation (t)",
        y = "log of Measure Value") +
   theme_minimal() +
@@ -955,7 +966,7 @@ ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
                     labels = c(d = expression(log(d(t))),
                                d_prime = expression(log(d * "'"~(t))),
                                AM = expression(log(AM(pi[0], t))))) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
   labs(x = "Generation (t)",
        y = "log of Measure Value") +
   theme_minimal() +
@@ -972,4 +983,82 @@ ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
 
 ## SDM CURVES
 
+variants = c("ab","full","bb")
 
+results_sdm = expand_grid(
+  t = ts,
+  variant = variants) |>
+  mutate(
+    boot = map2(
+      variant, t,
+      ~ with_boot(
+        data,
+        sdm_variant,
+        R             = 200,
+        level_dad     = dad_macro,
+        level_son     = occ_macro,
+        subgroup_var  = res_cty_ok,
+        g1            = 1,
+        g2            = 0,
+        t             = .y,
+        variant       = .x
+      )
+    )
+  ) |>
+  mutate(
+    est = map_dbl(boot, "estimate"),
+    se  = map_dbl(boot, "se")
+  )
+
+write_csv(results_sdm, "data/sdm_results.csv")
+
+results_sdm = read_csv("data/sdm_results.csv") |>
+  mutate(est = log(est))
+
+ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
+  geom_ribbon(aes(ymin = est - se, ymax = est + se),
+              alpha = 0.2, linetype = 0, show.legend = FALSE) +
+  geom_line(aes(linetype = variant), size = 1.1) +
+  geom_point(size = 2) +
+  
+  # custom color + linetype + label maps
+  scale_color_manual(
+    name   = "SDM variant",
+    values = c(ab = "darkgreen", full = "steelblue", bb = "darkred"),
+    labels = c(
+      ab   = expression(SDM(t, pi[0]^A, P[A],    pi[0]^B, P[B])),
+      full = expression(SDM(t, pi[0]^A, P,       pi[0]^B, P)),
+      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B]))
+    )
+  ) +
+  scale_linetype_manual(
+    name   = "SDM variant",
+    values = c(ab = "solid", full = "dashed", bb = "dotdash"),
+    labels = c(
+      ab   = expression(SDM(t, pi[0]^A, P[A],    pi[0]^B, P[B])),
+      full = expression(SDM(t, pi[0]^A, P,       pi[0]^B, P)),
+      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B]))
+    )
+  ) +
+  
+  scale_x_continuous(breaks = ts) +
+  labs(
+    x     = "t (generations)",
+    y     = expression(SDM(t)),
+    title = "Subgroup-Difference Memory Curves"
+  ) +
+  theme_classic(base_size = 14) +
+  theme(
+    axis.line    = element_line(size = 1),
+    axis.ticks   = element_line(size = 0.8),
+    axis.text    = element_text(size = 12),
+    axis.title   = element_text(size = 14, face = "bold"),
+    legend.position      = c(0.95, 0.05),
+    legend.justification = c("right","bottom"),
+    legend.direction     = "vertical",
+    legend.background    = element_rect(fill = alpha("white", 0.8)),
+    legend.key.width     = unit(1,"lines"),
+    legend.key.height    = unit(0.8,"lines"),
+    legend.title         = element_text(size = 12),
+    legend.text          = element_text(size = 10)
+  )
