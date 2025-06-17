@@ -25,7 +25,7 @@ pi_0 = function(data, level) {
   df = data |> 
     group_by({{ level }}) |>
     summarise(total_w = sum(weight),
-                         .groups = "drop") |>
+              .groups = "drop") |>
     mutate(pi0 = total_w / sum(total_w)) |>
     arrange({{ level }})
   
@@ -34,43 +34,37 @@ pi_0 = function(data, level) {
   return(pi0_vec)
 }
 
-p_matrix <- function(data, level_dad, level_son, matrix = TRUE) {
-  # 1) Capture the columns as symbols
-  dad_sym <- ensym(level_dad)
-  son_sym <- ensym(level_son)
+p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
+  dad_sym = ensym(level_dad)
+  son_sym = ensym(level_son)
   
-  # 2) Get their names as strings
-  dad_nm  <- as_string(dad_sym)
-  son_nm  <- as_string(son_sym)
+  dad_nm  = as_string(dad_sym)
+  son_nm  = as_string(son_sym)
   
-  # 3) Build the weighted transition table
-  df <- data %>%
-    group_by( !!dad_sym, !!son_sym ) %>%
+  df = data |>
+    group_by( !!dad_sym, !!son_sym ) |>
     summarise(
       n_w = sum(weight),
       .groups = "drop"
-    ) %>%
-    group_by( !!dad_sym ) %>%
+    ) |>
+    group_by( !!dad_sym ) |>
     mutate(
       n_i_w = sum(n_w),
       P     = n_w / n_i_w
-    ) %>%
+    ) |>
     ungroup()
   
-  # If the user wants the raw df, return that
   if (!matrix) return(df)
   
-  # 4) Pivot wide into a matrix
-  wide <- df %>%
-    select( !!dad_sym, !!son_sym, P ) %>%
+  wide = df |>
+    select( !!dad_sym, !!son_sym, P ) |>
     pivot_wider(
       names_from  = !!son_sym,
       values_from = P
     )
   
-  # 5) Convert to numeric matrix
-  mat <- as.matrix(wide %>% select(-!!dad_sym))
-  rownames(mat) <- pull(wide, !!dad_sym)
+  mat = as.matrix(wide |> select(-!!dad_sym))
+  rownames(mat) = pull(wide, !!dad_sym)
   
   mat
 }
@@ -204,6 +198,43 @@ sdm_data = function(data, level_dad, level_son, subgroup_var, g1, g2, t = 1){
     pi_0({{ level_dad }})
   
   sdm_core(pi0, P_mat, mu0, P_mat, t = t)
+}
+
+id_within = function(data,
+                     level_dad, level_son,
+                     subgroup_var, group,
+                     j, k,
+                     t = 1) {
+  sub = data 
+  filter({{ subgroup_var }} == group)
+  
+  P = p_matrix(sub, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  
+  P_t = if (t == 1) P else P %^% t
+  
+  row_j = P_t[j, ]
+  row_k = P_t[k, ]
+  
+  tv_norm(row_j, row_k)
+}
+
+ID_between = function(data,
+                      level_dad, level_son,
+                      subgroup_var, g1, g2,
+                      j,
+                      t = 1) {
+  P1 = data |>
+    filter({{ subgroup_var }} == g1) |>
+    p_matrix({{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  
+  P2 = data |>
+    filter({{ subgroup_var }} == g2) |>
+    p_matrix({{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  
+  P1_t = if (t == 1) P1 else P1 %^% t
+  P2_t = if (t == 1) P2 else P2 %^% t
+  
+  tv_norm(P1_t[j, ], P2_t[j, ])
 }
 
 ################################################################################
