@@ -193,7 +193,7 @@ sdm_core = function(pi0, P1, mu0, P2 = P1, t = 1){
 }
 
 sdm_data = function(data, level_dad, level_son, subgroup_var, g1, g2, t = 1){
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son}}, matrix = FALSE)
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son}}, matrix = TRUE)
   
   pi0 = data |>
     filter({{ subgroup_var }} == g1) |>
@@ -774,6 +774,8 @@ combined_plot_okl = g_okl + g0_okl + g_star_okl +
 
 ################################################################################
 
+data = data |> mutate(res_cty_ok = ifelse(res_cty == 0 | statefip_1940 == 40, 0, 1))
+
 ## d(t), d'(t), AIM CURVES
 
 ts = 0:5
@@ -799,14 +801,6 @@ results = expand_grid(
   mutate(dt_t = est*t)
 
 write_csv(results, "data/advanced_measures.csv")
-
-results1 = results |>
-  filter(measure == "d_prime") |>
-  mutate(
-    measure = "d_prime_t",
-    est = est * t) %>%
-  bind_rows(results, .) |>
-  arrange(factor(measure, levels = c("d", "d_prime", "d_prime_t", "AM")), t)
 
 ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = est - 1.96*se,
@@ -841,5 +835,110 @@ ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5))
 
+
+results_res = expand_grid(
+  t = ts,
+  measures) |>
+  mutate(boot = pmap(list(fn, t),
+                     ~ with_boot(
+                       res,
+                       ..1,
+                       R = 1000,
+                       level_dad = dad_macro,
+                       level_son = occ_macro,
+                       t = ..2))) |>
+  mutate(est = map_dbl(boot, "estimate"),
+         se = map_dbl(boot, "se")) |>
+  select(measure, t, est, se) |>
+  mutate(dt_t = est*t)
+
+write_csv(results_res, "data/advanced_measures_res.csv")
+
+ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
+  geom_ribbon(aes(ymin = est - 1.96*se,
+                  ymax = est + 1.96*se),
+              alpha = 0.2,
+              linetype = 0) +
+  geom_line(linetype = 1) +
+  geom_point(size = 1.5) +
+  scale_color_manual(values = c("d" = "black",
+                                "d_prime" = "orange",
+                                "AM" = "blue"),
+                     labels = c(d = expression(log(d(t))),
+                                d_prime = expression(log(d * "'"~(t))),
+                                AM = expression(log(AM(pi[0], t))))) +
+  scale_fill_manual(values = c("d" = "black",
+                               "d_prime" = "orange",
+                               "AM" = "blue"),
+                    labels = c(d = expression(log(d(t))),
+                               d_prime = expression(log(d * "'"~(t))),
+                               AM = expression(log(AM(pi[0], t))))) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  labs(x = "Generation (t)",
+       y = "log of Measure Value") +
+  theme_minimal() +
+  theme(legend.position = c(0.4, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5))
+
+results_nonres = expand_grid(
+  t = ts,
+  measures) |>
+  mutate(boot = pmap(list(fn, t),
+                     ~ with_boot(
+                       nonres,
+                       ..1,
+                       R = 1000,
+                       level_dad = dad_macro,
+                       level_son = occ_macro,
+                       t = ..2))) |>
+  mutate(est = map_dbl(boot, "estimate"),
+         se = map_dbl(boot, "se")) |>
+  select(measure, t, est, se) |>
+  mutate(dt_t = est*t)
+
+write_csv(results_nonres, "data/advanced_measures_nonres.csv")
+
+ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
+  geom_ribbon(aes(ymin = est - 1.96*se,
+                  ymax = est + 1.96*se),
+              alpha = 0.2,
+              linetype = 0) +
+  geom_line(linetype = 1) +
+  geom_point(size = 1.5) +
+  scale_color_manual(values = c("d" = "black",
+                                "d_prime" = "orange",
+                                "AM" = "blue"),
+                     labels = c(d = expression(log(d(t))),
+                                d_prime = expression(log(d * "'"~(t))),
+                                AM = expression(log(AM(pi[0], t))))) +
+  scale_fill_manual(values = c("d" = "black",
+                               "d_prime" = "orange",
+                               "AM" = "blue"),
+                    labels = c(d = expression(log(d(t))),
+                               d_prime = expression(log(d * "'"~(t))),
+                               AM = expression(log(AM(pi[0], t))))) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  labs(x = "Generation (t)",
+       y = "log of Measure Value") +
+  theme_minimal() +
+  theme(legend.position = c(0.4, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5))
+
+
 ## SDM CURVES
+
 
