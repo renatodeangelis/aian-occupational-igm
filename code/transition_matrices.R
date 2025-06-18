@@ -1104,7 +1104,7 @@ results_sdm = read_csv("data/sdm_results.csv") |>
   mutate(est = log(est))
 
 sdm_df = expand_grid(
-  t       = ts,
+  t       = 0:4,
   variant = variants) |>
   mutate(
     logSDM = map2_dbl(
@@ -1153,11 +1153,10 @@ sdm_curve = ggplot(sdm_df, aes(x = t, y = logSDM, color = variant, linetype = va
     )
   ) +
   scale_x_continuous(breaks = ts) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10, -12)) +
   labs(
     x     = "Generations (t)",
-    y     = "log SDM(t)",
-    title = "(Reservation vs. Non‐reservation Memory Curves)"
-  ) +
+    y     = "log SDM(t)") +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
@@ -1168,7 +1167,7 @@ sdm_curve = ggplot(sdm_df, aes(x = t, y = logSDM, color = variant, linetype = va
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5)) +
-  coord_cartesian(ylim = c(-8, 0))
+  coord_cartesian(ylim = c(-12, 0))
 
 s################################################################################
 
