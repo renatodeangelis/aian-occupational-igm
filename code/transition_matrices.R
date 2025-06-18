@@ -992,6 +992,87 @@ plot_nonres = ggplot(results_nonres, aes(x = t, y = est, color = measure, fill =
 
 combined_measures = plot_res + plot_nonres
 
+## IM CURVES
+
+# RESERVATION
+
+im_df_res = map_dfr(0:4, function(tt) {
+  # call your existing function im()
+  vals = im(res, dad_macro, occ_macro, t = tt)
+  # vals is a named numeric vector: names are the father‐origins
+  tibble(
+    t      = tt,
+    origin = names(vals),
+    logIM  = vals
+  )
+}) |>
+  mutate(origin = recode(origin,
+                         farming   = "Farming",
+                         blue_col  = "Manual",
+                         white_col = "Nonmanual",
+                         unemp     = "Not working"))
+
+im_res = ggplot(im_df_res, aes(x = t, y = logIM, color = origin)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  scale_color_brewer("Father origin", palette = "Dark2") +
+  scale_x_continuous(breaks = 0:5) +
+  labs(
+    x     = "Generation (t)",
+    y     = expression(log~IM(t,i)),
+  ) +
+  theme_minimal() +
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-8, 0))
+
+# NONRESERVATION
+im_df_nonres = map_dfr(0:4, function(tt) {
+  # call your existing function im()
+  vals = im(nonres, dad_macro, occ_macro, t = tt)
+  # vals is a named numeric vector: names are the father‐origins
+  tibble(
+    t      = tt,
+    origin = names(vals),
+    logIM  = vals
+  )
+}) |>
+  mutate(origin = recode(origin,
+                         farming   = "Farming",
+                         blue_col  = "Manual",
+                         white_col = "Nonmanual",
+                         unemp     = "Not working"))
+
+im_nonres = ggplot(im_df_nonres, aes(x = t, y = logIM, color = origin)) +
+  geom_line(linewidth = 1.1) +
+  geom_point(size = 2) +
+  scale_color_brewer("Father origin", palette = "Dark2") +
+  scale_x_continuous(breaks = 0:5) +
+  labs(
+    x     = "Generation (t)",
+    y     = expression(log~IM(t,i)),
+  ) +
+  theme_minimal() +
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right", "bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
+        legend.text = element_text(size = 13),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-8, 0))
+
+im_combined = im_res + im_nonres + plot_layout(widths = c(2, 2))
+
 ## SDM CURVES
 
 variants = c("paired", "full", "resonly", "nonresonly")
