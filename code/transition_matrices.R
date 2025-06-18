@@ -7,6 +7,8 @@ library(patchwork)
 library(expm)
 library(rlang)
 library(purrr)
+library(sf)
+library(tigris)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
@@ -187,26 +189,30 @@ sdm_core = function(pi0, P1, mu0, P2 = P1, t = 1){
   log(tv_norm(pi0_t, mu0_t))
 }
 
-sdm_variant = function(data,
-                        level_dad, level_son,
-                        subgroup_var, g1, g2,
-                        t = 1,
-                        variant = c("ab","full","bb")) {
+sdm_mobility = function(data,
+                         level_dad, level_son,
+                         subgroup_var,
+                         res_val, nonres_val,
+                         t = 1,
+                         variant = c("paired","full","resonly","nonresonly")) {
   variant = match.arg(variant)
   
-  P_full = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-
-  da      = data |> filter({{ subgroup_var }} == g1)
-  P_a     = p_matrix(da,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-  pi0_a   = pi_0(da,     {{ level_dad }})
+  P_full = p_matrix(data, {{level_dad}}, {{level_son}}, matrix=TRUE)
   
-  db      = data |> filter({{ subgroup_var }} == g2)
-  P_b     = p_matrix(db,  {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-  pi0_b   = pi_0(db,     {{ level_dad }})
+  d_res = filter(data, {{subgroup_var}} == res_val)
+  P_res = p_matrix(d_res, {{level_dad}}, {{level_son}}, matrix=TRUE)
+  pi0_res = pi_0(d_res, {{level_dad}})
   
-  if(variant=="ab")    return(sdm_core(pi0_a, P_a,   pi0_b, P_b,   t))
-  if(variant=="full")  return(sdm_core(pi0_a, P_full,pi0_b, P_full,t))
-  if(variant=="bb")    return(sdm_core(pi0_a, P_b,   pi0_b, P_b,   t))
+  d_nonres = filter(data, {{subgroup_var}} == nonres_val)
+  P_nonres = p_matrix(d_nonres, {{level_dad}}, {{level_son}}, matrix=TRUE)
+  pi0_nonres = pi_0(d_nonres,   {{level_dad}})
+  
+  switch(variant,
+         paired = sdm_core(pi0_res, P_res, pi0_nonres, P_nonres, t),
+         full = sdm_core(pi0_res, P_full, pi0_nonres, P_full, t),
+         resonly = sdm_core(pi0_res, P_res, pi0_nonres, P_res, t),
+         nonresonly = sdm_core(pi0_res, P_nonres, pi0_nonres, P_nonres, t)
+  )
 }
 
 id_within = function(data,
@@ -988,32 +994,31 @@ combined_measures = plot_res + plot_nonres
 
 ## SDM CURVES
 
-variants = c("ab","full","bb")
+variants = c("paired", "full", "resonly", "nonresonly")
 
 results_sdm = expand_grid(
-  t = ts,
+  t       = ts,
   variant = variants) |>
   mutate(
-    boot = map2(
-      variant, t,
+    boot = pmap(
+      list(variant, t),
       ~ with_boot(
-        data,
-        sdm_variant,
-        R             = 200,
-        level_dad     = dad_macro,
-        level_son     = occ_macro,
-        subgroup_var  = res_cty_ok,
-        g1            = 1,
-        g2            = 0,
-        t             = .y,
-        variant       = .x
+        data         = data,
+        stat_fn      = sdm_mobility,
+        R            = 1000,
+        level_dad    = dad_macro,
+        level_son    = occ_macro,
+        subgroup_var = res_cty_ok,
+        res_val      = 1,
+        nonres_val   = 0,
+        t            = ..2,
+        variant      = ..1
       )
-    )
+    ),
+    estimate = map_dbl(boot, "estimate"),
+    se       = map_dbl(boot, "se")
   ) |>
-  mutate(
-    est = map_dbl(boot, "estimate"),
-    se  = map_dbl(boot, "se")
-  )
+  select(-boot)
 
 write_csv(results_sdm, "data/sdm_results.csv")
 
@@ -1056,3 +1061,116 @@ ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5))
+
+################################################################################
+
+wtd_sd = function(x, w) {
+  m = weighted.mean(x, w, na.rm = TRUE)
+  sqrt( sum(w * (x - m)^2, na.rm = TRUE) / sum(w, na.rm = TRUE) )
+}
+
+demo = data |>
+  summarise(age = weighted.mean(age, weight),
+            res_cty_ok = weighted.mean(res_cty_ok, weight))
+
+occ = data |>
+  group_by(occ_macro) |>
+  summarise(wsum = sum(weight), .groups = "drop") |>
+  mutate(prop = wsum / sum(wsum)) |>
+  arrange(occ_macro)
+
+mobility_macro_by_region = data |>
+  # 1) define upward vs. downward
+  mutate(upward = case_when(
+    dad_macro == "unemp" & occ_macro != "umemp" ~ 1,
+    dad_macro == "farming" & occ_macro == "white_col" ~ 1,
+    dad_macro == "blue_col"   & occ_macro == "white_col" ~ 1,
+    TRUE ~ 0),
+    downward = case_when(
+      dad_macro == "white_col" & occ_macro != "white_col" ~ 1,
+      dad_macro == "blue_col" & occ_macro == "unemp" ~ 1,
+      dad_macro == "farming" & occ_macro == "umemp" ~ 1,
+      TRUE ~ 0)) |>
+  group_by(region) |>
+  summarise(upward_rate   = weighted.mean(upward,   weight, na.rm = TRUE),
+            downward_rate = weighted.mean(downward, weight, na.rm = TRUE),
+            .groups = "drop")
+
+mobility_meso_by_region = data |>
+  # 1) define upward vs. downward
+  mutate(
+    upward = case_when(
+      dad_meso == "farming"     & occ_meso %in% c("clerical", "prof")           ~ 1,
+      dad_meso == "unskilled"   & occ_meso %in% c("crafts", "clerical", "prof") ~ 1,
+      dad_meso == "crafts"      & occ_meso %in% c("clerical", "prof")           ~ 1,
+      dad_meso == "clerical"    & occ_meso == "prof" ~ 1,
+      dad_meso == "unemp" & occ_meso !=  "unemp" ~ 1,
+      TRUE  ~ 0
+    ),
+    downward = case_when(
+      # any non‐stay that isn’t classified as upward
+      dad_meso != occ_meso & upward == 0 ~ 1,
+      TRUE ~ 0
+    )
+  ) |>
+  # 2) aggregate by region, using your sampling‐weight `weight`
+  group_by(region) |>
+  summarise(
+    upward_rate   = weighted.mean(upward,   weight, na.rm = TRUE),
+    downward_rate = weighted.mean(downward, weight, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+mobility_by_region = data |>
+  mutate(
+    mobility = case_when(dad_macro != occ_macro ~ 1,
+                       TRUE ~ 0)) |>
+  group_by(region) |>
+  summarise(
+    mobility_rate = weighted.mean(mobility, weight, na.rm = TRUE),
+    .groups = "drop")
+
+states_sf = states(cb = TRUE) |>
+  filter(!STUSPS %in% c("AK","HI","PR","GU","VI","MP", "AS")) |>
+  st_transform(crs = 5070) |>
+  mutate(statefip_1940 = as.integer(STATEFP),
+         region = case_when(
+           statefip_1940 %in% c(8, 16, 32, 49, 56) ~ "basin",
+           statefip_1940 == 6 ~ "cali",
+           statefip_1940 %in% c(27, 55) ~ "lakes",
+           statefip_1940 %in% c(17, 18, 26, 39) ~ "midwest",
+           statefip_1940 == 37 ~ "nc",
+           statefip_1940 %in% c(9,10,23,24,25,33,34,36,42,44,50,11) ~ "ne",
+           statefip_1940 %in% c(30, 38, 46) ~ "plains",
+           statefip_1940 %in% c(41, 53) ~ "nw",
+           statefip_1940 == 40 ~ "ok",
+           statefip_1940 %in% c(19, 20, 29, 31) ~ "prairie",
+           statefip_1940 %in% c(1,5,12,13,21,22,28,45,47,48,51,54) ~ "south",
+           statefip_1940 %in% c(4, 35) ~ "sw",
+           TRUE ~ NA_character_)) |>
+  left_join(mobility_macro_by_region, by = "region") |>
+  left_join(mobility_by_region, by = "region")
+
+ggplot(states_sf) +
+  geom_sf(aes(fill = upward_rate), color = "grey40") +
+  scale_fill_gradient(name = "Upward Mobility",
+                      low = "yellow", high = "red",
+                      labels = scales::percent_format(accuracy = 1)) +
+  theme_void()
+
+ggplot(states_sf) +
+  geom_sf(aes(fill = downward_rate), color = "grey40") +
+  scale_fill_gradient(name = "Downward Mobility",
+                      low = "lavender", high = "purple",
+                      labels = scales::percent_format(accuracy = 1)) +
+  theme_void()
+
+ggplot(states_sf) +
+  geom_sf(aes(fill = mobility_rate), color = "grey40") +
+  scale_fill_gradient(name = "Total Mobility",
+                      low = "lightblue", high = "darkblue",
+                      labels = scales::percent_format(accuracy = 1)) +
+  theme_void()
+
+
+
