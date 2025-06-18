@@ -1060,10 +1060,7 @@ im_nonres = ggplot(im_df_nonres, aes(x = t, y = logIM, color = origin)) +
     y     = expression(log~IM(t,i)),
   ) +
   theme_minimal() +
-  theme(legend.position = c(0.5, 0.05),
-        legend.justification = c("right", "bottom"),
-        legend.direction = "vertical",
-        legend.title = element_blank(),
+  theme(legend.position = "none",
         legend.text = element_text(size = 13),
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
@@ -1078,7 +1075,7 @@ im_combined = im_res + im_nonres + plot_layout(widths = c(2, 2))
 variants = c("paired", "full", "resonly", "nonresonly")
 
 results_sdm = expand_grid(
-  t       = ts,
+  t       = 0:4,
   variant = variants) |>
   mutate(
     boot = pmap(
@@ -1106,34 +1103,63 @@ write_csv(results_sdm, "data/sdm_results.csv")
 results_sdm = read_csv("data/sdm_results.csv") |>
   mutate(est = log(est))
 
-ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
-  geom_ribbon(aes(ymin = est - 1.96*se, ymax = est + 1.96*se),
-              alpha = 0.2, linetype = 0, show.legend = FALSE) +
-  geom_line(aes(linetype = variant), size = 1) +
-  geom_point(size = 1.5) +
+sdm_df = expand_grid(
+  t       = ts,
+  variant = variants) |>
+  mutate(
+    logSDM = map2_dbl(
+      variant, t,
+      ~ sdm_mobility(
+        data         = data,
+        level_dad    = dad_macro,
+        level_son    = occ_macro,
+        subgroup_var = res_cty_ok,
+        res_val      = 1,
+        nonres_val   = 0,
+        t            = .y,
+        variant      = .x)))
+
+sdm_curve = ggplot(sdm_df, aes(x = t, y = logSDM, color = variant, linetype = variant)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 2) +
   scale_color_manual(
-    name   = "SDM variant",
-    values = c(ab = "darkgreen", full = "steelblue", bb = "darkred"),
+    name   = NULL,
+    values = c(
+      paired     = "black",
+      full       = "firebrick",
+      resonly    = "steelblue",
+      nonresonly = "darkgreen"
+    ),
     labels = c(
-      ab   = expression(SDM(t, pi[0]^A, P[A],    pi[0]^B, P[B])),
-      full = expression(SDM(t, pi[0]^A, P,       pi[0]^B, P)),
-      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B]))
+      paired     = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[N])),
+      full       = expression(log~SDM(t, pi[0]^R, P,       pi[0]^N, P)),
+      resonly    = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[R])),
+      nonresonly = expression(log~SDM(t, pi[0]^R, P[N],    pi[0]^N, P[N]))
     )
   ) +
   scale_linetype_manual(
-    name   = "SDM variant",
-    values = c(ab = "dashed", full = "solid", bb = "solid"),
+    name   = NULL,
+    values = c(
+      paired     = "dashed",
+      full       = "solid",
+      resonly    = "solid",
+      nonresonly = "solid"
+    ),
     labels = c(
-      ab   = expression(SDM(t, pi[0]^A, P[A],    pi[0]^B, P[B])),
-      full = expression(SDM(t, pi[0]^A, P,       pi[0]^B, P)),
-      bb   = expression(SDM(t, pi[0]^A, P[B],    pi[0]^B, P[B])))) +
+      paired     = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[N])),
+      full       = expression(log~SDM(t, pi[0]^R, P,       pi[0]^N, P)),
+      resonly    = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[R])),
+      nonresonly = expression(log~SDM(t, pi[0]^R, P[N],    pi[0]^N, P[N]))
+    )
+  ) +
   scale_x_continuous(breaks = ts) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10, -12),
-                     limits = c(-12, 0)) +
-  labs(x = "Generation (t)",
-       y = expression(SDM(t))) +
+  labs(
+    x     = "Generations (t)",
+    y     = "log SDM(t)",
+    title = "(Reservation vs. Non‐reservation Memory Curves)"
+  ) +
   theme_minimal() +
-  theme(legend.position = c(0.4, 0.05),
+  theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
         legend.direction = "vertical",
         legend.title = element_blank(),
@@ -1141,9 +1167,10 @@ ggplot(results_sdm, aes(x = t, y = est, color = variant, fill = variant)) +
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
-        axis.ticks = element_line(size = 0.5))
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-8, 0))
 
-################################################################################
+s################################################################################
 
 wtd_sd = function(x, w) {
   m = weighted.mean(x, w, na.rm = TRUE)
