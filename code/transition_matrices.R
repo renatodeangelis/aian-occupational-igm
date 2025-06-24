@@ -848,6 +848,8 @@ results = expand_grid(
 
 write_csv(results, "data/advanced_measures.csv")
 
+results = read_csv("data/advanced_measures.csv")
+
 ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = est - 1.96*se,
                   ymax = est + 1.96*se),
@@ -909,17 +911,17 @@ plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measu
               linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
-  scale_color_manual(values = c("d" = "black",
-                                "d_prime" = "orange",
-                                "AM" = "blue"),
+  scale_color_manual(values = c("d" = "#332288",
+                                "d_prime" = "#009E73",
+                                "AM" = "darkred"),
                      labels = c(d = expression(log(d(t))),
-                                d_prime = expression(log(d * "'"~(t))),
+                                d_prime = expression(log(d*"'"*(t))),
                                 AM = expression(log(AM(pi[0], t))))) +
-  scale_fill_manual(values = c("d" = "black",
-                               "d_prime" = "orange",
-                               "AM" = "blue"),
+  scale_fill_manual(values = c("d" = "#332288",
+                               "d_prime" = "#009E73",
+                               "AM" = "darkred"),
                     labels = c(d = expression(log(d(t))),
-                               d_prime = expression(log(d * "'"~(t))),
+                               d_prime = expression(log(d*"'"*(t))),
                                AM = expression(log(AM(pi[0], t))))) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
   labs(x = "Generation (t)",
@@ -963,17 +965,17 @@ plot_nonres = ggplot(results_nonres, aes(x = t, y = est, color = measure, fill =
               linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
-  scale_color_manual(values = c("d" = "black",
-                                "d_prime" = "orange",
-                                "AM" = "blue"),
+  scale_color_manual(values = c("d" = "#332288",
+                                "d_prime" = "#009E73",
+                                "AM" = "darkred"),
                      labels = c(d = expression(log(d(t))),
-                                d_prime = expression(log(d * "'"~(t))),
+                                d_prime = expression(log(d*"'"*(t))),
                                 AM = expression(log(AM(pi[0], t))))) +
-  scale_fill_manual(values = c("d" = "black",
-                               "d_prime" = "orange",
-                               "AM" = "blue"),
+  scale_fill_manual(values = c("d" = "#332288",
+                               "d_prime" = "#009E73",
+                               "AM" = "darkred"),
                     labels = c(d = expression(log(d(t))),
-                               d_prime = expression(log(d * "'"~(t))),
+                               d_prime = expression(log(d*"'"*(t))),
                                AM = expression(log(AM(pi[0], t))))) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
   labs(x = "Generation (t)",
