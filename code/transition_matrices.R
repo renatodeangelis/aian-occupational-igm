@@ -77,6 +77,7 @@ pi_star = function(p_mat) {
   eig = eigen(t(P))
   idx = which.min(abs(eig$values - 1))
   v = Re(eig$vectors[, idx])
+  if (any(v < 0)) v = abs(v)
   pi_star = v / sum(v)
   names(pi_star) = rownames(P)
   return(pi_star)
@@ -115,6 +116,49 @@ with_boot = function(data, stat_fn, R = 200, ...){
   
   list(estimate = est,
        se = se)
+}
+
+with_boot_bb = function(data, stat_fn, R = 1000, ..., prior = c("plain", "weight"), .parallel = FALSE, .seed = NULL) {
+  if (!is.null(.seed)) set.seed(.seed)
+  prior = match.arg(prior)
+  N = nrow(data)
+  args_q = rlang::enquos(...)
+  
+  stat_call = function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
+  
+  # One BB draw: multiply existing weights by independent Gammas
+  bb_once = function() {
+    if (prior == "plain") {
+      g = rexp(N, rate = 1)
+    } else {
+      # prior mass proportional to sampling weights (shift tiny eps to avoid zeros)
+      a = pmax(data$weight, 1e-12)
+      g = rgamma(N, shape = a, rate = 1)
+    }
+    d_b = data
+    d_b$weight = data$weight * g
+    stat_call(d_b)
+  }
+  
+  boots = if (.parallel) {
+    parallel::mclapply(seq_len(R), function(i) bb_once(), mc.cores = max(1L, parallel::detectCores() - 1L))
+  } else {
+    replicate(R, bb_once(), simplify = FALSE)
+  }
+  
+  est = stat_call(data)
+  boots_arr = simplify2array(boots)
+  
+  se =
+    if (is.atomic(est) && length(est) == 1L) {
+      sd(boots_arr, na.rm = TRUE)
+    } else if (is.matrix(boots_arr) || (is.array(boots_arr) && length(dim(boots_arr)) == 2L)) {
+      apply(boots_arr, 1L, sd, na.rm = TRUE)
+    } else {
+      stop("with_boot_bb(): unsupported output type from stat_fn()")
+    }
+  
+  list(estimate = est, se = se)
 }
 
 tv_norm = function(mu, nu){
@@ -250,6 +294,58 @@ id_between = function(data,
   P2_t = if (t == 1) P2 else P2 %^% t
   
   tv_norm(P1_t[j, ], P2_t[j, ])
+}
+
+## ---- helpers to find generators of d(t) and d'(t) ----------------------------
+
+d_generator = function(P_t, pi_star) {
+  # returns the class(es) i with max || P_t(i,·) - π* ||_TV and the value
+  scores = apply(P_t, 1, function(r) tv_norm(r, pi_star))
+  mx = max(scores)
+  i_star = which(abs(scores - mx) < 1e-12)
+  list(classes = rownames(P_t)[i_star], value = mx)
+}
+
+dprime_generator = function(P_t) {
+  # returns the pair(s) (i,j) with max || P_t(i,·) - P_t(j,·) ||_TV and the value
+  n = nrow(P_t)
+  best = -Inf
+  keep = list()
+  for (i in 1:(n-1)) for (j in (i+1):n) {
+    v = tv_norm(P_t[i, ], P_t[j, ])
+    if (v > best + 1e-12) {
+      best = v
+      keep = list(c(i, j))
+    } else if (abs(v - best) <= 1e-12) {
+      keep = append(keep, list(c(i, j)))
+    }
+  }
+  pairs_named = lapply(keep, \(idx) rownames(P_t)[idx])
+  list(pairs = pairs_named, value = best)
+}
+
+identify_generators = function(data, level_dad, level_son, ts = 0:5) {
+  P = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  piS = pi_star(P)
+  
+  purrr::map_dfr(ts, function(tt) {
+    P_t = if (tt == 0) diag(nrow(P)) else P %^% tt
+    rownames(P_t) = rownames(P)
+    
+    dgen  = d_generator(P_t, piS)
+    dpgen = dprime_generator(P_t)
+    
+    tibble::tibble(
+      t               = tt,
+      d_value         = dgen$value,
+      d_classes       = paste(dgen$classes, collapse = " | "),
+      dprime_value    = dpgen$value,
+      dprime_pairs    = paste(
+        vapply(dpgen$pairs, function(p) paste(p, collapse = " vs "), character(1)),
+        collapse = "  |  "
+      )
+    )
+  })
 }
 
 ################################################################################
@@ -1072,106 +1168,7 @@ im_nonres = ggplot(im_df_nonres, aes(x = t, y = logIM, color = origin)) +
 
 im_combined = im_res + im_nonres + plot_layout(widths = c(2, 2))
 
-## SDM CURVES
-
-variants = c("paired", "full", "resonly", "nonresonly")
-
-results_sdm = expand_grid(
-  t       = 0:4,
-  variant = variants) |>
-  mutate(
-    boot = pmap(
-      list(variant, t),
-      ~ with_boot(
-        data         = data,
-        stat_fn      = sdm_mobility,
-        R            = 1000,
-        level_dad    = dad_macro,
-        level_son    = occ_macro,
-        subgroup_var = res_cty_ok,
-        res_val      = 1,
-        nonres_val   = 0,
-        t            = ..2,
-        variant      = ..1
-      )
-    ),
-    estimate = map_dbl(boot, "estimate"),
-    se       = map_dbl(boot, "se")
-  ) |>
-  select(-boot)
-
-write_csv(results_sdm, "data/sdm_results.csv")
-
-results_sdm = read_csv("data/sdm_results.csv") |>
-  mutate(est = log(est))
-
-sdm_df = expand_grid(
-  t       = 0:4,
-  variant = variants) |>
-  mutate(
-    logSDM = map2_dbl(
-      variant, t,
-      ~ sdm_mobility(
-        data         = data,
-        level_dad    = dad_macro,
-        level_son    = occ_macro,
-        subgroup_var = res_cty_ok,
-        res_val      = 1,
-        nonres_val   = 0,
-        t            = .y,
-        variant      = .x)))
-
-sdm_curve = ggplot(sdm_df, aes(x = t, y = logSDM, color = variant, linetype = variant)) +
-  geom_line(size = 1.2) +
-  geom_point(size = 2) +
-  scale_color_manual(
-    name   = NULL,
-    values = c(
-      paired     = "black",
-      full       = "firebrick",
-      resonly    = "steelblue",
-      nonresonly = "darkgreen"
-    ),
-    labels = c(
-      paired     = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[N])),
-      full       = expression(log~SDM(t, pi[0]^R, P,       pi[0]^N, P)),
-      resonly    = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[R])),
-      nonresonly = expression(log~SDM(t, pi[0]^R, P[N],    pi[0]^N, P[N]))
-    )
-  ) +
-  scale_linetype_manual(
-    name   = NULL,
-    values = c(
-      paired     = "dashed",
-      full       = "solid",
-      resonly    = "solid",
-      nonresonly = "solid"
-    ),
-    labels = c(
-      paired     = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[N])),
-      full       = expression(log~SDM(t, pi[0]^R, P,       pi[0]^N, P)),
-      resonly    = expression(log~SDM(t, pi[0]^R, P[R],    pi[0]^N, P[R])),
-      nonresonly = expression(log~SDM(t, pi[0]^R, P[N],    pi[0]^N, P[N]))
-    )
-  ) +
-  scale_x_continuous(breaks = ts) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10, -12)) +
-  labs(
-    x     = "Generations (t)",
-    y     = "log SDM(t)") +
-  theme_minimal() +
-  theme(legend.position = c(0.5, 0.05),
-        legend.justification = c("right", "bottom"),
-        legend.direction = "vertical",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 13),
-        axis.line.x = element_line(linewidth = 0.5),
-        axis.line.y = element_line(linewidth = 0.5),
-        axis.text = element_text(size = 10),
-        axis.ticks = element_line(size = 0.5)) +
-  coord_cartesian(ylim = c(-12, 0))
-
-s################################################################################
+################################################################################
 
 wtd_sd = function(x, w) {
   m = weighted.mean(x, w, na.rm = TRUE)
@@ -1187,99 +1184,4 @@ occ = data |>
   summarise(wsum = sum(weight), .groups = "drop") |>
   mutate(prop = wsum / sum(wsum)) |>
   arrange(occ_macro)
-
-mobility_macro_by_region = data |>
-  # 1) define upward vs. downward
-  mutate(upward = case_when(
-    dad_macro == "unemp" & occ_macro != "umemp" ~ 1,
-    dad_macro == "farming" & occ_macro == "white_col" ~ 1,
-    dad_macro == "blue_col"   & occ_macro == "white_col" ~ 1,
-    TRUE ~ 0),
-    downward = case_when(
-      dad_macro == "white_col" & occ_macro != "white_col" ~ 1,
-      dad_macro == "blue_col" & occ_macro == "unemp" ~ 1,
-      dad_macro == "farming" & occ_macro == "umemp" ~ 1,
-      TRUE ~ 0)) |>
-  group_by(region) |>
-  summarise(upward_rate   = weighted.mean(upward,   weight, na.rm = TRUE),
-            downward_rate = weighted.mean(downward, weight, na.rm = TRUE),
-            .groups = "drop")
-
-mobility_meso_by_region = data |>
-  # 1) define upward vs. downward
-  mutate(
-    upward = case_when(
-      dad_meso == "farming"     & occ_meso %in% c("clerical", "prof")           ~ 1,
-      dad_meso == "unskilled"   & occ_meso %in% c("crafts", "clerical", "prof") ~ 1,
-      dad_meso == "crafts"      & occ_meso %in% c("clerical", "prof")           ~ 1,
-      dad_meso == "clerical"    & occ_meso == "prof" ~ 1,
-      dad_meso == "unemp" & occ_meso !=  "unemp" ~ 1,
-      TRUE  ~ 0
-    ),
-    downward = case_when(
-      # any non‐stay that isn’t classified as upward
-      dad_meso != occ_meso & upward == 0 ~ 1,
-      TRUE ~ 0
-    )
-  ) |>
-  # 2) aggregate by region, using your sampling‐weight `weight`
-  group_by(region) |>
-  summarise(
-    upward_rate   = weighted.mean(upward,   weight, na.rm = TRUE),
-    downward_rate = weighted.mean(downward, weight, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-mobility_by_region = data |>
-  mutate(
-    mobility = case_when(dad_macro != occ_macro ~ 1,
-                       TRUE ~ 0)) |>
-  group_by(region) |>
-  summarise(
-    mobility_rate = weighted.mean(mobility, weight, na.rm = TRUE),
-    .groups = "drop")
-
-states_sf = states(cb = TRUE) |>
-  filter(!STUSPS %in% c("AK","HI","PR","GU","VI","MP", "AS")) |>
-  st_transform(crs = 5070) |>
-  mutate(statefip_1940 = as.integer(STATEFP),
-         region = case_when(
-           statefip_1940 %in% c(8, 16, 32, 49, 56) ~ "basin",
-           statefip_1940 == 6 ~ "cali",
-           statefip_1940 %in% c(27, 55) ~ "lakes",
-           statefip_1940 %in% c(17, 18, 26, 39) ~ "midwest",
-           statefip_1940 == 37 ~ "nc",
-           statefip_1940 %in% c(9,10,23,24,25,33,34,36,42,44,50,11) ~ "ne",
-           statefip_1940 %in% c(30, 38, 46) ~ "plains",
-           statefip_1940 %in% c(41, 53) ~ "nw",
-           statefip_1940 == 40 ~ "ok",
-           statefip_1940 %in% c(19, 20, 29, 31) ~ "prairie",
-           statefip_1940 %in% c(1,5,12,13,21,22,28,45,47,48,51,54) ~ "south",
-           statefip_1940 %in% c(4, 35) ~ "sw",
-           TRUE ~ NA_character_)) |>
-  left_join(mobility_macro_by_region, by = "region") |>
-  left_join(mobility_by_region, by = "region")
-
-ggplot(states_sf) +
-  geom_sf(aes(fill = upward_rate), color = "grey40") +
-  scale_fill_gradient(name = "Upward Mobility",
-                      low = "yellow", high = "red",
-                      labels = scales::percent_format(accuracy = 1)) +
-  theme_void()
-
-ggplot(states_sf) +
-  geom_sf(aes(fill = downward_rate), color = "grey40") +
-  scale_fill_gradient(name = "Downward Mobility",
-                      low = "lavender", high = "purple",
-                      labels = scales::percent_format(accuracy = 1)) +
-  theme_void()
-
-ggplot(states_sf) +
-  geom_sf(aes(fill = mobility_rate), color = "grey40") +
-  scale_fill_gradient(name = "Total Mobility",
-                      low = "lightblue", high = "darkblue",
-                      labels = scales::percent_format(accuracy = 1)) +
-  theme_void()
-
-
 
