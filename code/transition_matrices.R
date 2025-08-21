@@ -12,8 +12,25 @@ library(tigris)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
+mid_order = c("unemp", "farming", "unskilled", "crafts", "nonmanual")
+
+to_mid = function(x) {
+  recode(
+    as.character(x),
+    "farming" = "farming",
+    "unskilled" = "unskilled",
+    "crafts"    = "crafts",
+    "clerical"  = "nonmanual",
+    "prof"      = "nonmanual",
+    "unemp"     = "unemp",
+    .default = NA_character_
+  ) |> factor(levels = mid_order)
+}
+  
 data = read_csv("data/aian_weighted.csv") |>
   mutate(
+    dad_mid = to_mid(dad_meso),
+    occ_mid = to_mid(occ_meso),
     dad_macro = factor(dad_macro, levels = macro_order),
     occ_macro = factor(occ_macro, levels = macro_order),
     dad_meso = factor(dad_meso, levels = meso_order),
@@ -69,7 +86,7 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
   mat = as.matrix(wide |> select(-!!dad_sym))
   rownames(mat) = pull(wide, !!dad_sym)
   
-  mat
+  return(mat)
 }
 
 pi_star = function(p_mat) {
@@ -83,82 +100,65 @@ pi_star = function(p_mat) {
   return(pi_star)
 }
 
-
 ################################################################################
 ############################## ADVANCED MEASURES ###############################
 ################################################################################
 
-with_boot = function(data, stat_fn, R = 200, ...){
-  args_q = enquos(...)
-  N = nrow(data)
+with_boot <- function(data, stat_fn, R = 200, ...) {
+  args_q <- rlang::enquos(...)
+  N <- nrow(data)
+  stat_call <- function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
   
-  call_stat = function(d){
-    call_expr = call2(stat_fn, data = d, !!!args_q)
-    eval_tidy(call_expr)
-  }
+  est <- stat_call(data)
   
-  est = call_stat(data)
+  boots <- replicate(R, {
+    d_b <- data[sample.int(N, N, replace = TRUE), , drop = FALSE]
+    stat_call(d_b)
+  }, simplify = TRUE)  # for these stats, boots is a numeric vector (scalar per draw)
   
-  boots = replicate(R, {
-    d_b = data |> slice_sample(n = N, replace = TRUE)
-    call_stat(d_b)
-  }, simplify = FALSE)
+  se <- sd(boots, na.rm = TRUE)
   
-  boots_arr = simplify2array(boots)
-  
-  if (is.atomic(est) && length(est) == 1) {
-    se = sd(boots_arr, na.rm = TRUE)
-  } else if (is.matrix(boots_arr) || (is.array(boots_arr) && length(dim(boots_arr)) == 2)){
-    se = apply(boots_arr, 1, sd, na.rm = TRUE)
-  } else {
-    stop("with_boot(): unsupported output type from stat_fn()")
-  }
-  
-  list(estimate = est,
-       se = se)
+  list(estimate = est, se = se, draws = boots)
 }
 
-with_boot_bb = function(data, stat_fn, R = 1000, ..., prior = c("plain", "weight"), .parallel = FALSE, .seed = NULL) {
+
+boot_pmatrix_ci = function(
+    data, level_dad, level_son,
+    R = 1000, conf = 0.95, .seed = NULL
+){
   if (!is.null(.seed)) set.seed(.seed)
-  prior = match.arg(prior)
-  N = nrow(data)
-  args_q = rlang::enquos(...)
   
-  stat_call = function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
   
-  # One BB draw: multiply existing weights by independent Gammas
-  bb_once = function() {
-    if (prior == "plain") {
-      g = rexp(N, rate = 1)
-    } else {
-      # prior mass proportional to sampling weights (shift tiny eps to avoid zeros)
-      a = pmax(data$weight, 1e-12)
-      g = rgamma(N, shape = a, rate = 1)
-    }
-    d_b = data
-    d_b$weight = data$weight * g
-    stat_call(d_b)
+  # point estimate
+  P_hat = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
+  rnames = rownames(P_hat); cnames = colnames(P_hat)
+  nR = nrow(P_hat); nC = ncol(P_hat)
+  
+  # one classical bootstrap draw: resample indices
+  boot_once = function() {
+    idx = sample.int(nrow(data), nrow(data), replace = TRUE)
+    d_b = data[idx, , drop = FALSE]
+    p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
   }
   
-  boots = if (.parallel) {
-    parallel::mclapply(seq_len(R), function(i) bb_once(), mc.cores = max(1L, parallel::detectCores() - 1L))
-  } else {
-    replicate(R, bb_once(), simplify = FALSE)
-  }
+  boots = replicate(R, boot_once(), simplify = FALSE)
+  arr   = simplify2array(boots)  # [rows x cols x R]
   
-  est = stat_call(data)
-  boots_arr = simplify2array(boots)
+  alpha = 1 - conf
+  se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
+  q_lo   = apply(arr, c(1, 2), quantile, probs = alpha/2, na.rm = TRUE, names = FALSE)
+  q_hi   = apply(arr, c(1, 2), quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
   
-  se =
-    if (is.atomic(est) && length(est) == 1L) {
-      sd(boots_arr, na.rm = TRUE)
-    } else if (is.matrix(boots_arr) || (is.array(boots_arr) && length(dim(boots_arr)) == 2L)) {
-      apply(boots_arr, 1L, sd, na.rm = TRUE)
-    } else {
-      stop("with_boot_bb(): unsupported output type from stat_fn()")
-    }
-  
-  list(estimate = est, se = se)
+  tibble::tibble(
+    !!dad_sym := rep(rnames, times = nC),
+    !!son_sym := rep(cnames, each  = nR),
+    est = as.vector(P_hat),
+    se  = as.vector(se_mat),
+    lo  = as.vector(q_lo),
+    hi  = as.vector(q_hi)
+  )
 }
 
 tv_norm = function(mu, nu){
@@ -557,6 +557,176 @@ g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)
 combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
   plot_layout(widths = c(6, 1, 1))
 
+## MID
+
+## RESERVATION ONLY
+
+ci_res = boot_pmatrix_ci(
+  res, dad_mid, occ_mid,
+  R = 1000, conf = 0.95, .seed = 123
+) |>
+  mutate(
+    dad_mid = factor(dad_mid, levels = rev(mid_order)),
+    occ_mid = factor(occ_mid, levels = mid_order)
+  )
+
+g_mid_res = ggplot(ci_res, aes(x = occ_mid, y = dad_mid, fill = est)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
+            vjust = 0.3, size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(
+    x = "Son occupation",
+    y = "Father occupation",
+    fill = "Transition Prob.",
+    title = "P"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(angle = 45, hjust = 1),
+    axis.ticks = element_blank(),
+    axis.title = element_text(size = 10),
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+pi0_vec_mid_res = pi_0(res, dad_mid)
+df_pi0_mid_res = tibble(
+  father = names(pi0_vec_mid_res),
+  pi0    = as.numeric(pi0_vec_mid_res)
+) |>
+  mutate(father = factor(father, levels = rev(mid_order)))
+
+g0_mid_res = ggplot(df_pi0_mid_res, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)), size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi[0])) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y  = element_text(angle = 45, hjust = 1),
+    axis.ticks.y = element_blank(),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+steady_mid_res = pi_star(p_matrix(res, dad_mid, occ_mid, TRUE))
+df_pi_star_mid_res = tibble(
+  father  = names(steady_mid_res),
+  pi_star = as.numeric(steady_mid_res)
+) |>
+  mutate(father = factor(father, levels = rev(mid_order)))
+
+g_star_mid_res = ggplot(df_pi_star_mid_res, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)), size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi^"*")) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y  = element_text(angle = 45, hjust = 1),
+    axis.ticks.y = element_blank(),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+combined_plot_mid_res = g_mid_res + g0_mid_res + g_star_mid_res +
+  plot_layout(widths = c(6, 1, 1))
+
+
+## NONRESERVATION ONLY
+
+ci_nonres = boot_pmatrix_ci(
+  nonres, dad_mid, occ_mid,
+  R = 1000, conf = 0.95, .seed = 123
+) |>
+  mutate(
+    dad_mid = factor(dad_mid, levels = rev(mid_order)),
+    occ_mid = factor(occ_mid, levels = mid_order)
+  )
+
+g_mid_nonres = ggplot(ci_nonres, aes(x = occ_mid, y = dad_mid, fill = est)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
+            vjust = 0.3, size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(
+    x = "Son occupation",
+    y = "Father occupation",
+    fill = "Transition Prob.",
+    title = "P"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.text.y = element_text(angle = 45, hjust = 1),
+    axis.ticks = element_blank(),
+    axis.title = element_text(size = 10),
+    legend.position = "bottom",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+pi0_vec_mid_nonres = pi_0(nonres, dad_mid)
+df_pi0_mid_nonres = tibble(
+  father = names(pi0_vec_mid_nonres),
+  pi0    = as.numeric(pi0_vec_mid_nonres)
+) |>
+  mutate(father = factor(father, levels = rev(mid_order)))
+
+g0_mid_nonres = ggplot(df_pi0_mid_nonres, aes(x = 1, y = father, fill = pi0)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi0)), size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi[0])) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y  = element_text(angle = 45, hjust = 1),
+    axis.ticks.y = element_blank(),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+steady_mid_nonres = pi_star(p_matrix(nonres, dad_mid, occ_mid, TRUE))
+df_pi_star_mid_nonres = tibble(
+  father  = names(steady_mid_nonres),
+  pi_star = as.numeric(steady_mid_nonres)
+) |>
+  mutate(father = factor(father, levels = rev(mid_order)))
+
+g_star_mid_nonres = ggplot(df_pi_star_mid_nonres, aes(x = 1, y = father, fill = pi_star)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = sprintf("%.2f", pi_star)), size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi^"*")) +
+  theme_minimal() +
+  theme(
+    axis.title.x = element_blank(),
+    axis.text.x  = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text.y  = element_text(angle = 45, hjust = 1),
+    axis.ticks.y = element_blank(),
+    legend.position = "none",
+    plot.title = element_text(hjust = 0.5)
+  )
+
+combined_plot_mid_nonres = g_mid_nonres + g0_mid_nonres + g_star_mid_nonres +
+  plot_layout(widths = c(6, 1, 1))
+
+
 ################################################################################
 
 data = data |> mutate(res_cty_ok = ifelse(res_cty == 0 | statefip_1940 == 40, 0, 1))
@@ -569,102 +739,39 @@ measures = tibble(
   fn = list(d_t, d_prime, am)
 )
 
-results = expand_grid(
-  t = ts,
-  measures) |>
+results_res <- expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(
-                       data,
-                       ..1,
-                       R = 1000,
-                       level_dad = dad_macro,
-                       level_son = occ_macro,
-                       t = ..2))) |>
-  mutate(est = map_dbl(boot, "estimate"),
-         se = map_dbl(boot, "se")) |>
-  select(measure, t, est, se) |>
-  mutate(dt_t = est*t)
-
-write_csv(results, "data/advanced_measures.csv")
-
-results = read_csv("data/advanced_measures.csv")
-
-ggplot(results, aes(x = t, y = est, color = measure, fill = measure)) +
-  geom_ribbon(aes(ymin = est - 1.96*se,
-                  ymax = est + 1.96*se),
-              alpha = 0.2,
-              linetype = 0) +
-  geom_line(linetype = 1) +
-  geom_point(size = 1.5) +
-  scale_color_manual(values = c("d" = "black",
-                                "d_prime" = "orange",
-                                "AM" = "blue"),
-                     labels = c(d = expression(log(d(t))),
-                                d_prime = expression(log(d * "'"~(t))),
-                                AM = expression(log(AM(pi[0], t))))) +
-  scale_fill_manual(values = c("d" = "black",
-                               "d_prime" = "orange",
-                               "AM" = "blue"),
-                    labels = c(d = expression(log(d(t))),
-                               d_prime = expression(log(d * "'"~(t))),
-                               AM = expression(log(AM(pi[0], t))))) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
-  labs(x = "Generation (t)",
-       y = "log of Measure Value") +
-  theme_minimal() +
-  theme(legend.position = c(0.4, 0.05),
-        legend.justification = c("right", "bottom"),
-        legend.direction = "vertical",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 13),
-        axis.line.x = element_line(linewidth = 0.5),
-        axis.line.y = element_line(linewidth = 0.5),
-        axis.text = element_text(size = 10),
-        axis.ticks = element_line(size = 0.5))
-
-
-results_res = expand_grid(
-  t = ts,
-  measures) |>
-  mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(
-                       res,
-                       ..1,
-                       R = 1000,
-                       level_dad = dad_macro,
-                       level_son = occ_macro,
-                       t = ..2))) |>
-  mutate(est = map_dbl(boot, "estimate"),
-         se = map_dbl(boot, "se")) |>
-  select(measure, t, est, se) |>
-  mutate(dt_t = est*t)
+                     ~ with_boot(res, ..1, R = 1000,
+                                 level_dad = dad_mid,
+                                 level_son = occ_mid,
+                                 t = ..2))) |>
+  mutate(
+    est   = map_dbl(boot, "estimate"),
+    se    = map_dbl(boot, "se"),
+    lo    = map_dbl(boot, ~ quantile(.x$draws, 0.025, na.rm = TRUE)),
+    hi    = map_dbl(boot, ~ quantile(.x$draws, 0.975, na.rm = TRUE))
+  ) |>
+  select(measure, t, est, se, lo, hi) |>
+  mutate(dt_t = est * t)
 
 write_csv(results_res, "data/advanced_measures_res.csv")
 
 results_res = read_csv("data/advanced_measures_res.csv")
 
-plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
-  geom_ribbon(aes(ymin = est - 1.96*se,
-                  ymax = est + 1.96*se),
-              alpha = 0.2,
-              linetype = 0) +
+plot_res <- ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
-  scale_color_manual(values = c("d" = "#332288",
-                                "d_prime" = "#009E73",
-                                "AM" = "darkred"),
+  scale_color_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
                      labels = c(d = expression(log(d(t))),
                                 d_prime = expression(log(d*"'"*(t))),
                                 AM = expression(log(AM(pi[0], t))))) +
-  scale_fill_manual(values = c("d" = "#332288",
-                               "d_prime" = "#009E73",
-                               "AM" = "darkred"),
+  scale_fill_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
                     labels = c(d = expression(log(d(t))),
                                d_prime = expression(log(d*"'"*(t))),
                                AM = expression(log(AM(pi[0], t))))) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
-  labs(x = "Generation (t)",
-       y = "log of Measure Value") +
+  labs(x = "Generation (t)", y = "log of Measure Value") +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
@@ -677,48 +784,39 @@ plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measu
         axis.ticks = element_line(size = 0.5)) +
   coord_cartesian(ylim = c(-10, 0))
 
-results_nonres = expand_grid(
-  t = ts,
-  measures) |>
+results_nonres <- expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(
-                       nonres,
-                       ..1,
-                       R = 1000,
-                       level_dad = dad_macro,
-                       level_son = occ_macro,
-                       t = ..2))) |>
-  mutate(est = map_dbl(boot, "estimate"),
-         se = map_dbl(boot, "se")) |>
-  select(measure, t, est, se) |>
-  mutate(dt_t = est*t)
+                     ~ with_boot(nonres, ..1, R = 1000,
+                                 level_dad = dad_mid,
+                                 level_son = occ_mid,
+                                 t = ..2))) |>
+  mutate(
+    est   = map_dbl(boot, "estimate"),
+    se    = map_dbl(boot, "se"),
+    lo    = map_dbl(boot, ~ quantile(.x$draws, 0.025, na.rm = TRUE)),
+    hi    = map_dbl(boot, ~ quantile(.x$draws, 0.975, na.rm = TRUE))
+  ) |>
+  select(measure, t, est, se, lo, hi) |>
+  mutate(dt_t = est * t)
 
 write_csv(results_nonres, "data/advanced_measures_nonres.csv")
 
 results_nonres = read_csv("data/advanced_measures_nonres.csv")
 
-plot_nonres = ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
-  geom_ribbon(aes(ymin = est - 1.96*se,
-                  ymax = est + 1.96*se),
-              alpha = 0.2,
-              linetype = 0) +
+plot_nonres <- ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
-  scale_color_manual(values = c("d" = "#332288",
-                                "d_prime" = "#009E73",
-                                "AM" = "darkred"),
+  scale_color_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
                      labels = c(d = expression(log(d(t))),
                                 d_prime = expression(log(d*"'"*(t))),
                                 AM = expression(log(AM(pi[0], t))))) +
-  scale_fill_manual(values = c("d" = "#332288",
-                               "d_prime" = "#009E73",
-                               "AM" = "darkred"),
+  scale_fill_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
                     labels = c(d = expression(log(d(t))),
                                d_prime = expression(log(d*"'"*(t))),
                                AM = expression(log(AM(pi[0], t))))) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
-  labs(x = "Generation (t)",
-       y = "log of Measure Value") +
+  labs(x = "Generation (t)", y = "log of Measure Value") +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right", "bottom"),
