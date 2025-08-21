@@ -919,8 +919,8 @@ im_boot_res_mid <- boot_im_by_t(res, dad_mid, occ_mid, ts = 0:5, R = 1000, .seed
 
 im_res_mid_plot <- ggplot(im_boot_res_mid, aes(x = t, y = est, color = origin)) +
   geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0, color = NA) +
-  geom_line(linewidth = 0.8) +
-  geom_point(size = 1.9) +
+  geom_line(linetype = 1) +
+  geom_point(size = 1.5) +
   scale_color_manual(values = tol_bright) +
   scale_fill_manual(values = tol_bright) +
   scale_x_continuous(breaks = 0:5) +
@@ -947,8 +947,8 @@ im_boot_nonres_mid <- boot_im_by_t(nonres, dad_mid, occ_mid, ts = 0:5, R = 1000,
 
 im_nonres_mid_plot <- ggplot(im_boot_nonres_mid, aes(x = t, y = est, color = origin)) +
   geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0, color = NA) +
-  geom_line(linewidth = 0.8) +
-  geom_point(size = 1.9) +
+  geom_line(linetype = 1) +
+  geom_point(size = 1.5) +
   scale_color_manual(values = tol_bright) +
   scale_fill_manual(values = tol_bright) +
   scale_x_continuous(breaks = 0:5) +
