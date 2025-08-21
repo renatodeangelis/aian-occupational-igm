@@ -104,19 +104,19 @@ pi_star = function(p_mat) {
 ############################## ADVANCED MEASURES ###############################
 ################################################################################
 
-with_boot <- function(data, stat_fn, R = 200, ...) {
-  args_q <- rlang::enquos(...)
-  N <- nrow(data)
-  stat_call <- function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
+with_boot = function(data, stat_fn, R = 200, ...) {
+  args_q = rlang::enquos(...)
+  N = nrow(data)
+  stat_call = function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
   
-  est <- stat_call(data)
+  est = stat_call(data)
   
-  boots <- replicate(R, {
-    d_b <- data[sample.int(N, N, replace = TRUE), , drop = FALSE]
+  boots = replicate(R, {
+    d_b = data[sample.int(N, N, replace = TRUE), , drop = FALSE]
     stat_call(d_b)
   }, simplify = TRUE)  # for these stats, boots is a numeric vector (scalar per draw)
   
-  se <- sd(boots, na.rm = TRUE)
+  se = sd(boots, na.rm = TRUE)
   
   list(estimate = est, se = se, draws = boots)
 }
@@ -739,7 +739,7 @@ measures = tibble(
   fn = list(d_t, d_prime, am)
 )
 
-results_res <- expand_grid(t = ts, measures) |>
+results_res = expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
                      ~ with_boot(res, ..1, R = 1000,
                                  level_dad = dad_mid,
@@ -758,7 +758,7 @@ write_csv(results_res, "data/advanced_measures_res.csv")
 
 results_res = read_csv("data/advanced_measures_res.csv")
 
-plot_res <- ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
+plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
@@ -784,7 +784,7 @@ plot_res <- ggplot(results_res, aes(x = t, y = est, color = measure, fill = meas
         axis.ticks = element_line(size = 0.5)) +
   coord_cartesian(ylim = c(-10, 0))
 
-results_nonres <- expand_grid(t = ts, measures) |>
+results_nonres = expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
                      ~ with_boot(nonres, ..1, R = 1000,
                                  level_dad = dad_mid,
@@ -803,7 +803,7 @@ write_csv(results_nonres, "data/advanced_measures_nonres.csv")
 
 results_nonres = read_csv("data/advanced_measures_nonres.csv")
 
-plot_nonres <- ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
+plot_nonres = ggplot(results_nonres, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
@@ -833,36 +833,102 @@ combined_measures = plot_res + plot_nonres
 
 ## IM CURVES
 
+boot_im_by_t <- function(data, level_dad, level_son, ts = 0:5, R = 1000, .seed = NULL) {
+  if (!is.null(.seed)) set.seed(.seed)
+  
+  dad_sym <- rlang::ensym(level_dad)
+  son_sym <- rlang::ensym(level_son)
+  
+  # point estimates first
+  P0   <- p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
+  piS0 <- pi_star(P0)
+  rowlabs <- rownames(P0)
+  
+  point_by_t <- purrr::map(ts, function(tt) {
+    Pt <- if (tt == 0) diag(nrow(P0)) else P0 %^% tt
+    im_vals <- apply(Pt, 1, function(r) tv_norm(r, piS0))
+    tibble::tibble(t = tt, origin = rowlabs, est = log(im_vals))
+  }) |> dplyr::bind_rows()
+  
+  # bootstrap draws (classical): resample indices, recompute P, pi*, and IM(t,i)
+  N <- nrow(data)
+  boot_once <- function() {
+    idx <- sample.int(N, N, replace = TRUE)
+    db  <- data[idx, , drop = FALSE]
+    P   <- p_matrix(db, !!dad_sym, !!son_sym, matrix = TRUE)
+    piS <- pi_star(P)
+    
+    # for efficiency, walk powers iteratively
+    Pt <- diag(nrow(P))
+    out_list <- vector("list", length(ts))
+    for (k in seq_along(ts)) {
+      tt <- ts[k]
+      if (tt > 0) {
+        # incrementally multiply from previous Pt (safer than P%^%tt in a loop)
+        if (k == 1) {  # if first t > 0
+          Pt <- P %^% tt
+        } else {
+          # if ts is strictly increasing by 1, you can do Pt <- Pt %*% P
+          # but to be robust to arbitrary ts, recompute only when needed:
+          Pt <- P %^% tt
+        }
+      } else {
+        Pt <- diag(nrow(P))
+      }
+      im_vals <- apply(Pt, 1, function(r) tv_norm(r, piS))
+      out_list[[k]] <- log(im_vals)
+    }
+    # returns a matrix [origins x length(ts)]
+    do.call(cbind, out_list)
+  }
+  
+  boots <- replicate(R, boot_once(), simplify = FALSE)  # list of matrices
+  # stack to array: [origin x t x R]
+  arr <- simplify2array(boots)
+  # names
+  dimnames(arr) <- list(origin = rowlabs, t = as.character(ts), rep = NULL)
+  
+  # summarize: SE + percentile CI per (origin, t)
+  alpha <- 0.05
+  summ <- lapply(ts, function(tt) {
+    a2 <- arr[, as.character(tt), , drop = FALSE]  # [origin x 1 x R]
+    draws_mat <- drop(a2)                           # [origin x R]
+    se <- apply(draws_mat, 1, sd, na.rm = TRUE)
+    lo <- apply(draws_mat, 1, quantile, probs = alpha/2,     na.rm = TRUE, names = FALSE)
+    hi <- apply(draws_mat, 1, quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
+    tibble::tibble(t = tt, origin = rowlabs, se = unname(se), lo = unname(lo), hi = unname(hi))
+  }) |> dplyr::bind_rows()
+  
+  dplyr::left_join(point_by_t, summ, by = c("t", "origin"))
+}
+
+tol_bright <- c(
+  "#4477AA", # blue
+  "#EE6677", # red
+  "#228833", # green
+  "#CCBB44", # yellow
+  "#66CCEE"  # cyan
+)
+
 # RESERVATION
+im_boot_res_mid <- boot_im_by_t(res, dad_mid, occ_mid, ts = 0:5, R = 1000, .seed = 123) |>
+  dplyr::mutate(origin = dplyr::recode(origin,
+                                       farming="Farming", unskilled="Unskilled", crafts="Crafts",
+                                       nonmanual="Nonmanual", unemp="Not working"
+  ))
 
-im_df_res = map_dfr(0:4, function(tt) {
-  # call your existing function im()
-  vals = im(res, dad_macro, occ_macro, t = tt)
-  # vals is a named numeric vector: names are the father‐origins
-  tibble(
-    t      = tt,
-    origin = names(vals),
-    logIM  = vals
-  )
-}) |>
-  mutate(origin = recode(origin,
-                         farming   = "Farming",
-                         blue_col  = "Manual",
-                         white_col = "Nonmanual",
-                         unemp     = "Not working"))
-
-im_res = ggplot(im_df_res, aes(x = t, y = logIM, color = origin)) +
-  geom_line(linewidth = 1.1) +
-  geom_point(size = 2) +
-  scale_color_brewer("Father origin", palette = "Dark2") +
+im_res_mid_plot <- ggplot(im_boot_res_mid, aes(x = t, y = est, color = origin)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0, color = NA) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.9) +
+  scale_color_manual(values = tol_bright) +
+  scale_fill_manual(values = tol_bright) +
   scale_x_continuous(breaks = 0:5) +
-  labs(
-    x     = "Generation (t)",
-    y     = expression(log~IM(t,i)),
-  ) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
+  labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
-        legend.justification = c("right", "bottom"),
+        legend.justification = c("right","bottom"),
         legend.direction = "vertical",
         legend.title = element_blank(),
         legend.text = element_text(size = 13),
@@ -870,44 +936,38 @@ im_res = ggplot(im_df_res, aes(x = t, y = logIM, color = origin)) +
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5)) +
-  coord_cartesian(ylim = c(-8, 0))
+  coord_cartesian(ylim = c(-10, 0))
 
 # NONRESERVATION
-im_df_nonres = map_dfr(0:4, function(tt) {
-  # call your existing function im()
-  vals = im(nonres, dad_macro, occ_macro, t = tt)
-  # vals is a named numeric vector: names are the father‐origins
-  tibble(
-    t      = tt,
-    origin = names(vals),
-    logIM  = vals
-  )
-}) |>
-  mutate(origin = recode(origin,
-                         farming   = "Farming",
-                         blue_col  = "Manual",
-                         white_col = "Nonmanual",
-                         unemp     = "Not working"))
+im_boot_nonres_mid <- boot_im_by_t(nonres, dad_mid, occ_mid, ts = 0:5, R = 1000, .seed = 123) |>
+  dplyr::mutate(origin = dplyr::recode(origin,
+                                       farming="Farming", unskilled="Unskilled", crafts="Crafts",
+                                       nonmanual="Nonmanual", unemp="Not working"
+  ))
 
-im_nonres = ggplot(im_df_nonres, aes(x = t, y = logIM, color = origin)) +
-  geom_line(linewidth = 1.1) +
-  geom_point(size = 2) +
-  scale_color_brewer("Father origin", palette = "Dark2") +
+im_nonres_mid_plot <- ggplot(im_boot_nonres_mid, aes(x = t, y = est, color = origin)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0, color = NA) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 1.9) +
+  scale_color_manual(values = tol_bright) +
+  scale_fill_manual(values = tol_bright) +
   scale_x_continuous(breaks = 0:5) +
-  labs(
-    x     = "Generation (t)",
-    y     = expression(log~IM(t,i)),
-  ) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
+  labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
   theme_minimal() +
-  theme(legend.position = "none",
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right","bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank(),
         legend.text = element_text(size = 13),
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5)) +
-  coord_cartesian(ylim = c(-8, 0))
+  coord_cartesian(ylim = c(-10, 0))
 
-im_combined = im_res + im_nonres + plot_layout(widths = c(2, 2))
+im_combined <- im_res_mid_plot + im_nonres_mid_plot + 
+  plot_layout(widths = c(2, 2))
 
 ################################################################################
 
