@@ -5,10 +5,8 @@ library(tidyr)
 library(tibble)
 library(sf)
 
-setwd("~/Downloads")
-
 aian_raw = readr::read_csv(
-  file = "clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv",
+  file = "https://www.dropbox.com/scl/fi/3gwg0wvb0sj0njjdjxg1p/clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv?rlkey=qvub7x5cy6zsbgp74a90l381q&st=kdbmvn65&dl=1",
   col_types = cols(.default = col_integer(),
                    histid_1850 = col_character(),
                    histid_1860 = col_character(),
@@ -122,11 +120,8 @@ aian_filtered = aian_clean |>
     son_meso == "crafts" | son_meso == "unskilled" ~ "blue_col",
     son_meso == "unemp" ~ "unemp"))
 
-unzip("nhgis0002_shapefile_tl2000_us_county_1940.zip", exdir = "cty_1940_shp")
-unzip("cb_2018_us_aiannh_500k.zip", exdir = "res_1920_shp")
-
-cty_40 = st_read("cty_1940_shp/US_county_1940.shp")
-res_20 = st_read("res_1920_shp/cb_2018_us_aiannh_500k.shp")
+cty_40 = st_read("https://www.dropbox.com/scl/fi/1rx7fuw5blctgk7sqmba4/US_county_1940.shp?rlkey=xjtuncz0x3691y03znvvistyc&st=tcb6p1a8&dl=1")
+res_20 = st_read("https://www.dropbox.com/scl/fi/widz8tcgo2ax2vo2t0fdp/cb_2018_us_aiannh_500k.shp?rlkey=tycamc53pjssahhukne999h5i&st=n2hsznlf&dl=1")
 
 res = st_transform(res_20, 5070)
 cty = st_transform(cty_40, 5070) |>
@@ -196,8 +191,6 @@ aian_res = aian_filtered |>
   rename("county_icp" = "countyicp_1940") |>
   left_join(overlap, by = c("state_icp", "county_icp")) |>
   mutate(res_cty = replace_na(res_cty, 0))
-
-setwd("~/")
 
 write_csv(aian_res, "aian-igm/data/aian_filtered.csv")
 write_csv(overlap, "aian-igm/data/res_counties.csv")
