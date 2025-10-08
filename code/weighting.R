@@ -8,7 +8,7 @@ aian_filtered = read_csv("data/aian_filtered.csv")
 res_counties = read_csv("data/res_counties.csv")
 
 setwd("~/Downloads")
-aian_full = read_csv("usa_00018.csv") |>
+aian_full = read_csv("usa_00020.csv") |>
   janitor::clean_names() |>
   filter(age < 40) |>
   mutate(linked = 0) |>

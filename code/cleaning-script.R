@@ -69,8 +69,7 @@ aian_clean = aian_raw |>
          -urban_1930) |>
   rename(son_occ = occ1950_1940) |>
   filter(age_1940 >= 20 & age_1940 < 40,
-         sex_1940 == 1,
-         !(sex_pop_1940 == 2))
+         sex_1940 == 1)
 
 modal_occ = aian_clean |>
   pivot_longer(
