@@ -10,7 +10,7 @@ res_counties = read_csv("data/res_counties.csv")
 setwd("~/Downloads")
 aian_full = read_csv("usa_00020.csv") |>
   janitor::clean_names() |>
-  filter(age < 40) |>
+  filter(age < 45) |>
   mutate(linked = 0) |>
   mutate(occ_meso = case_when(
     occ1950 == 100 | occ1950 == 123 ~ "farming",
@@ -41,7 +41,8 @@ aian_full = read_csv("usa_00020.csv") |>
     stateicp %in% c(61, 66) ~ "sw",
     TRUE ~ NA_character_)) |>
   rename(state_icp = stateicp,
-         county_icp = countyicp) |>
+         county_icp = countyicp,
+         educd_1940 = educd) |>
   left_join(res_counties, by = c("state_icp", "county_icp")) |>
   mutate(res_cty = replace_na(res_cty, 0))
 
@@ -68,7 +69,7 @@ aian_filtered = aian_filtered |>
 
 aian_comb = bind_rows(aian_filtered, aian_full) |>
   mutate(
-    age_group = cut(age, breaks = c(20, 25, 30, 35, 40), right = FALSE),
+    age_group = cut(age, breaks = c(20, 25, 30, 35, 40, 45), right = FALSE),
     res_cty = as.factor(res_cty),
     occ_meso = as.factor(occ_meso),
     region = as.factor(region))

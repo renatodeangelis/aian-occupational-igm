@@ -29,7 +29,7 @@ aian_raw = readr::read_csv(
   janitor::clean_names()
 
 aian_clean = aian_raw |>
-  select_if(~ !all(is.na(.))) |>
+  select(where(~ !all(is.na(.)))) |>
   select(-starts_with("gqtyped"),
          -starts_with("birthyr"),
          -starts_with("raced"),
@@ -68,28 +68,88 @@ aian_clean = aian_raw |>
          -urban_1920,
          -urban_1930) |>
   rename(son_occ = occ1950_1940) |>
-  filter(age_1940 >= 25 & age_1940 < 45,
-         sex_1940 == 1)
+  filter(age_1940 >= 20 & age_1940 < 45,
+         sex_1940 == 1) |>
+  group_by(histid_1940) |>
+  summarise(across(starts_with("w_parent"), ~ max(.x)),
+            across(6:37, ~ max(.x)),
+            across(38:42, ~ paste(unique(na.omit(.x)), collapse = "; "),
+                   .names = "{.col}"),
+            across(43:100, ~ paste(unique(na.omit(.x)), collapse = "; "),
+                   .names = "{.col}"),
+            .groups = "drop") |>
+  mutate(across(39:101, ~ na_if(.x, "")),
+         across(44:101, as.integer))
 
-modal_occ = aian_clean |>
+df = aian_clean |>
+  select(starts_with("histid_pop_"),
+         starts_with("occ1950_pop_"),
+         starts_with("age_pop_")) |>
+  # person id = first non-missing histid across years
+  mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
+                        histid_pop_1910, histid_pop_1900))
+
+occ_long = df |>
   pivot_longer(
     cols = starts_with("occ1950_pop_"),
     names_to = "year",
+    names_pattern = "occ1950_pop_(\\d{4})",
+    names_transform = list(year = as.integer),
     values_to = "occ",
-    values_drop_na = TRUE) |>
-  mutate(year_num = as.integer(str_extract(year, "\\d{4}"))) |>
-  group_by(histid_pop_1940, occ) |>
-  summarise(freq = n(),
-            first_year = min(year_num),
-            .groups = "drop") |>
-  group_by(histid_pop_1940) |>
-  filter(freq == max(freq)) |>
-  slice_min(first_year, n = 1, with_ties = FALSE) |>
-  ungroup() |>
-  select(histid_pop_1940, modal_occ = occ)
+    values_drop_na = TRUE
+  ) |>
+  select(pid, year, occ) |>
+  group_by(pid, year) |>
+  summarise(
+    occ = {
+      vals = unique(na.omit(occ))
+      if (length(vals) == 0) NA_integer_
+      else if (any(vals <= 970)) vals[vals <= 970][1]
+      else vals[1]
+    },
+    .groups = "drop"
+  )
 
-aian_filtered = aian_clean |>
-  left_join(modal_occ, by = "histid_pop_1940") |>
+age_long = df |>
+  pivot_longer(
+    cols = starts_with("age_pop_"),
+    names_to = "year",
+    names_pattern = "age_pop_(\\d{4})",
+    names_transform = list(year = as.integer),
+    values_to = "age",
+    values_drop_na = TRUE
+  ) |>
+  select(pid, year, age) |>
+  group_by(pid, year) |>
+  summarise(age = dplyr::first(na.omit(age), default = NA_integer_), .groups = "drop")
+
+modal_input = occ_long |>
+  left_join(age_long, by = c("pid", "year")) |> 
+  group_by(pid) |>
+  mutate(
+    # Is there at least one <= 970 for this person?
+    has_pref = any(occ <= 970, na.rm = TRUE),
+    occ_used = if_else(has_pref & occ <= 970, occ, if_else(has_pref, NA_integer_, occ))
+  ) |>
+  # Drop rows that aren't in the eligible pool
+  filter(!is.na(occ_used)) |>
+  # Mode: count frequency of occ_used within pid
+  add_count(pid, occ_used, name = "freq") |>
+  filter(freq == max(freq)) |>                 # keep modal ties only
+  # Tie-breaker: closest age to 40 (NAs last)
+  mutate(age_dist = abs(age - 40)) |>
+  arrange(pid, age_dist) |>
+  slice_head(n = 1) |>                         # one row per pid
+  ungroup() |>
+  transmute(pid, modal_occ = occ_used,
+            picked_year = year, age_at_pick = age)
+
+aian_merged = aian_clean |>
+  mutate(across(starts_with("histid_pop"), as.character),
+         pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
+                        histid_pop_1910, histid_pop_1900)) |>
+  left_join(modal_input, by = "pid") |>
+  select(-pid) |>
   mutate(dad_meso = case_when(
     modal_occ == 100 | modal_occ == 123 ~ "farming",
     modal_occ <= 99 | (modal_occ >= 200 & modal_occ <= 290) ~ "prof",
@@ -186,7 +246,7 @@ aian_res = aian_filtered |>
     statefip_1940 == 54 ~ 56,   # West Virginia
     statefip_1940 == 55 ~ 25,   # Wisconsin
     statefip_1940 == 56 ~ 68,   # Wyoming
-    TRUE ~ NA_real_)) |>
+    TRUE ~ NA_real_)) #|>
   rename("county_icp" = "countyicp_1940") |>
   left_join(overlap, by = c("state_icp", "county_icp")) |>
   mutate(res_cty = replace_na(res_cty, 0))
