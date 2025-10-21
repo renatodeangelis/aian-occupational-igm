@@ -7,30 +7,13 @@ library(patchwork)
 library(expm)
 library(rlang)
 library(purrr)
-library(sf)
 library(tigris)
 
 macro_order = c("farming", "blue_col", "white_col", "unemp")
 meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
-mid_order = c("unemp", "farming", "unskilled", "crafts", "nonmanual")
 
-to_mid = function(x) {
-  recode(
-    as.character(x),
-    "farming" = "farming",
-    "unskilled" = "unskilled",
-    "crafts"    = "crafts",
-    "clerical"  = "nonmanual",
-    "prof"      = "nonmanual",
-    "unemp"     = "unemp",
-    .default = NA_character_
-  ) |> factor(levels = mid_order)
-}
-  
 data = read_csv("data/aian_weighted.csv") |>
   mutate(
-    dad_mid = to_mid(dad_meso),
-    occ_mid = to_mid(occ_meso),
     dad_macro = factor(dad_macro, levels = macro_order),
     occ_macro = factor(occ_macro, levels = macro_order),
     dad_meso = factor(dad_meso, levels = meso_order),
@@ -98,6 +81,64 @@ pi_star = function(p_mat) {
   pi_star = v / sum(v)
   names(pi_star) = rownames(P)
   return(pi_star)
+}
+
+p_upward = function(data,
+                    level = c("macro", "meso"),
+                    farming = TRUE,
+                    unemp = FALSE,
+                    weight = weight) {
+  
+  level = match.arg(level)
+  
+  data |>
+    mutate(upward =
+             (unemp & dad_macro == "unemp" & occ_macro != "unemp") |
+             (farming & dad_macro == "farming" & occ_macro == "white_col") |
+             if (level == "macro")
+               (dad_macro == "blue_col" & occ_macro == "white_col")
+           else 
+             (dad_meso == "unskilled" & (occ_macro == "white_col" | occ_meso == "crafts")) |
+             (dad_meso == "clerical" & occ_meso == "prof")) |>
+    summarise(upward = weighted.mean(as.numeric(upward), w = {{ weight }})) |>
+    pull(upward)
+}
+
+upward = function(p_mat,
+                  level = c("macro", "meso"),
+                  farming = TRUE,
+                  unemp = FALSE)
+
+p_downward = function(data,
+                      level = c("macro", "meso"),
+                      farming = TRUE,
+                      unemp = FALSE,
+                      weight = weight) {
+  
+  level = match.arg(level)
+  
+  data |>
+    mutate(downward = 
+             (unemp & dad_macro != "unemp" & occ_macro == "unemp") |
+             (farming & dad_macro == "white_col" & occ_macro == "farming") |
+             if (level == "macro")
+               (dad_macro == "white_col" & occ_macro == "blue_col")
+           else
+             ((dad_macro == "white_col" | dad_meso == "crafts") & occ_meso == "unskilled") |
+             (dad_meso == "prof" & occ_meso == "clerical")) |>
+    summarise(downward = weighted.mean(as.numeric(downward), w = {{ weight }})) |>
+    pull(downward)
+}
+
+shorrocks = function(data, level_dad, level_son, weight = weight) {
+  data |>
+    mutate(.same = {{ level_dad }} != {{ level_son }}) |>
+    summarise(prop = weighted.mean(as.numeric(.same), w = {{ weight }}, na.rm = TRUE)) |>
+    pull(prop)
+}
+
+first_passage = function(p_mat) {
+  P = as.matrix(p_mat)
 }
 
 ################################################################################
