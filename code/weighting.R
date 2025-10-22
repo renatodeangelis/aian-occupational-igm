@@ -3,8 +3,7 @@ library(readr)
 library(tidyr)
 library(cobalt)
 
-setwd("~/aian-igm")
-aian_filtered = read_csv("data/aian_filtered.csv")
+aian_filtered = read_csv("data/aian_merged.csv")
 res_counties = read_csv("data/res_counties.csv")
 
 setwd("~/Downloads")
@@ -50,8 +49,8 @@ aian_filtered = aian_filtered |>
   mutate(linked = 1) |>
   rename(occ_meso = son_meso,
          occ_macro = son_macro,
-         stateicp = state_icp,
-         age = age_1940) |>
+#         stateicp = state_icp,
+         age = age_1940) #|>
   mutate(region = case_when(
     stateicp %in% c(62, 63, 65, 67, 68) ~ "basin",
     stateicp == 71 ~ "cali",
@@ -76,7 +75,7 @@ aian_comb = bind_rows(aian_filtered, aian_full) |>
 
 sum_linked = sum(aian_ps$linked == 1)
 
-ps_model = glm(linked ~ age_group + occ_meso + region + res_cty,
+ps_model = glm(linked ~ age_group + occ_meso,
             data = aian_comb,
             family = binomial)
 

@@ -69,8 +69,7 @@ aian_clean = aian_raw |>
          -urban_1930) |>
   rename(son_occ = occ1950_1940) |>
   filter(age_1940 >= 20 & age_1940 < 45,
-         sex_1940 == 1,
-         (age_1940 < age_pop_1940 + 10) | is.na(age_pop_1940)) |>
+         sex_1940 == 1) |>
   group_by(histid_1940) |>
   summarise(across(starts_with("w_parent"), ~ max(.x)),
             across(6:37, ~ max(.x)),
@@ -84,74 +83,84 @@ aian_clean = aian_raw |>
   filter(! if_any(starts_with("histid_pop_"), 
                   ~ grepl(";", .x, fixed = TRUE)))
 
-df = aian_clean |>
+aian_age = aian_clean |>
+  mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
+                        histid_pop_1910, histid_pop_1900)) |>
+  select(pid, starts_with("age_pop")) |>
+  mutate(birthyr_1900 = 1900 - age_pop_1900,
+         birthyr_1910 = 1910 - age_pop_1910,
+         birthyr_1920 = 1920 - age_pop_1920,
+         birthyr_1930 = 1930 - age_pop_1930,
+         birthyr_1940 = 1940 - age_pop_1940) |>
+  group_by(pid) |>
+  summarise(across(starts_with("birthyr"), ~ mean(.x, na.rm = TRUE)), .groups = "drop") |>
+  rowwise() |>
+  mutate(
+    n_ages = sum(!is.na(c_across(starts_with("birthyr")))),
+    birth_median = round(median(c_across(starts_with("birthyr")), na.rm = TRUE)),
+    spread = diff(range(c_across(starts_with("birthyr")), na.rm = TRUE))) |>
+  ungroup() |>
+  mutate(quality = case_when(
+    is.na(spread) ~ "no data",
+    spread <= 2 ~ "good",
+    spread <= 5 ~ "ok",
+    TRUE ~ "poor"))
+
+aian_ages = aian_clean |>
+  mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
+                        histid_pop_1910, histid_pop_1900),
+         birthyr_son = 1940 - age_1940) |>
+  left_join(aian_age |> select(pid, birth_median), by = "pid") |>
+  rename(birthyr_father = birth_median) |>
+  select(-starts_with("age")) |>
+  filter(birthyr_son > birthyr_father + 15)
+
+df = aian_ages |>
   select(starts_with("histid_pop_"),
          starts_with("occ1950_pop_"),
          starts_with("age_pop_")) |>
-  # person id = first non-missing histid across years
   mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
                         histid_pop_1910, histid_pop_1900))
 
-occ_long = df |>
+modal_input = aian_ages |>
+  select(pid, starts_with("occ1950_pop_"), birthyr_father) |>
   pivot_longer(
     cols = starts_with("occ1950_pop_"),
     names_to = "year",
     names_pattern = "occ1950_pop_(\\d{4})",
     names_transform = list(year = as.integer),
     values_to = "occ",
-    values_drop_na = TRUE
-  ) |>
-  select(pid, year, occ) |>
+    values_drop_na = TRUE) |>
   group_by(pid, year) |>
   summarise(
+    birthyr_father = dplyr::first(birthyr_father),
     occ = {
-      vals = unique(na.omit(occ))
+      vals <- unique(na.omit(occ))
       if (length(vals) == 0) NA_integer_
-      else if (any(vals <= 970)) vals[vals <= 970][1]
-      else vals[1]
+      else if (any(vals <= 970)) vals[vals <= 970][1] else vals[1]
     },
-    .groups = "drop"
-  )
-
-age_long = df |>
-  pivot_longer(
-    cols = starts_with("age_pop_"),
-    names_to = "year",
-    names_pattern = "age_pop_(\\d{4})",
-    names_transform = list(year = as.integer),
-    values_to = "age",
-    values_drop_na = TRUE
-  ) |>
-  select(pid, year, age) |>
-  group_by(pid, year) |>
-  summarise(age = dplyr::first(na.omit(age), default = NA_integer_), .groups = "drop")
-
-modal_input = occ_long |>
-  left_join(age_long, by = c("pid", "year")) |> 
+    .groups = "drop") |>
+  mutate(implied_age = ifelse(!is.na(birthyr_father), year - birthyr_father, NA_real_)) |>
   group_by(pid) |>
   mutate(
-    # Is there at least one <= 970 for this person?
     has_pref = any(occ <= 970, na.rm = TRUE),
-    occ_used = if_else(has_pref & occ <= 970, occ, if_else(has_pref, NA_integer_, occ))
-  ) |>
-  # Drop rows that aren't in the eligible pool
+    occ_used = if_else(has_pref & occ <= 970, occ,
+                       if_else(has_pref, NA_integer_, occ))) |>
   filter(!is.na(occ_used)) |>
-  # Mode: count frequency of occ_used within pid
   add_count(pid, occ_used, name = "freq") |>
-  filter(freq == max(freq)) |>                 # keep modal ties only
-  # Tie-breaker: closest age to 40 (NAs last)
-  mutate(age_dist = abs(age - 40)) |>
-  arrange(pid, age_dist) |>
-  slice_head(n = 1) |>                         # one row per pid
+  filter(freq == max(freq)) |>
+  mutate(age_dist = dplyr::coalesce(abs(implied_age - 40), Inf)) |>
+  arrange(pid, age_dist, year) |>
+  filter(dplyr::coalesce(implied_age, Inf) <= 65) |>
+  slice_head(n = 1) |>
   ungroup() |>
-  transmute(pid, modal_occ = occ_used,
-            picked_year = year, age_at_pick = age) |>
-  filter(age_at_pick <= 65)
+  transmute(pid,
+            modal_occ = occ_used,
+            picked_year = year,
+            age_at_pick = implied_age,
+            birthyr_father)
 
-aian_merged = aian_clean |>
-  mutate(across(starts_with("histid_pop"), as.character),
-         pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
-                        histid_pop_1910, histid_pop_1900)) |>
+aian_merged = aian_ages |>
   left_join(modal_input, by = "pid") |>
   select(-pid) |>
   filter(!is.na(modal_occ)) |>
