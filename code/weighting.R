@@ -41,9 +41,7 @@ aian_full = read_csv("usa_00020.csv") |>
     TRUE ~ NA_character_)) |>
   rename(state_icp = stateicp,
          county_icp = countyicp,
-         educd_1940 = educd) |>
-  left_join(res_counties, by = c("state_icp", "county_icp")) |>
-  mutate(res_cty = replace_na(res_cty, 0))
+         educd_1940 = educd)
 
 aian_filtered = aian_filtered |>
   mutate(linked = 1) |>

@@ -3,7 +3,6 @@ library(readr)
 library(stringr)
 library(tidyr)
 library(tibble)
-library(sf)
 
 aian_raw = readr::read_csv(
   file = "https://www.dropbox.com/scl/fi/3gwg0wvb0sj0njjdjxg1p/clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv?rlkey=qvub7x5cy6zsbgp74a90l381q&st=kdbmvn65&dl=1",
