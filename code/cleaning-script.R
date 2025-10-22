@@ -69,7 +69,8 @@ aian_clean = aian_raw |>
          -urban_1930) |>
   rename(son_occ = occ1950_1940) |>
   filter(age_1940 >= 20 & age_1940 < 45,
-         sex_1940 == 1) |>
+         sex_1940 == 1,
+         (age_1940 < age_pop_1940 + 10) | is.na(age_pop_1940)) |>
   group_by(histid_1940) |>
   summarise(across(starts_with("w_parent"), ~ max(.x)),
             across(6:37, ~ max(.x)),
@@ -79,7 +80,9 @@ aian_clean = aian_raw |>
                    .names = "{.col}"),
             .groups = "drop") |>
   mutate(across(39:101, ~ na_if(.x, "")),
-         across(44:101, as.integer))
+         across(44:101, as.integer)) |>
+  filter(! if_any(starts_with("histid_pop_"), 
+                  ~ grepl(";", .x, fixed = TRUE)))
 
 df = aian_clean |>
   select(starts_with("histid_pop_"),
@@ -142,7 +145,8 @@ modal_input = occ_long |>
   slice_head(n = 1) |>                         # one row per pid
   ungroup() |>
   transmute(pid, modal_occ = occ_used,
-            picked_year = year, age_at_pick = age)
+            picked_year = year, age_at_pick = age) |>
+  filter(age_at_pick <= 65)
 
 aian_merged = aian_clean |>
   mutate(across(starts_with("histid_pop"), as.character),
@@ -150,6 +154,7 @@ aian_merged = aian_clean |>
                         histid_pop_1910, histid_pop_1900)) |>
   left_join(modal_input, by = "pid") |>
   select(-pid) |>
+  filter(!is.na(modal_occ)) |>
   mutate(dad_meso = case_when(
     modal_occ == 100 | modal_occ == 123 ~ "farming",
     modal_occ <= 99 | (modal_occ >= 200 & modal_occ <= 290) ~ "prof",
@@ -179,77 +184,4 @@ aian_merged = aian_clean |>
     son_meso == "crafts" | son_meso == "unskilled" ~ "blue_col",
     son_meso == "unemp" ~ "unemp"))
 
-cty_40 = st_read("https://www.dropbox.com/scl/fi/1rx7fuw5blctgk7sqmba4/US_county_1940.shp?rlkey=xjtuncz0x3691y03znvvistyc&st=tcb6p1a8&dl=1")
-res_20 = st_read("https://www.dropbox.com/scl/fi/widz8tcgo2ax2vo2t0fdp/cb_2018_us_aiannh_500k.shp?rlkey=tycamc53pjssahhukne999h5i&st=n2hsznlf&dl=1")
-
-res = st_transform(res_20, 5070)
-cty = st_transform(cty_40, 5070) |>
-  mutate(state_icp = as.integer(ICPSRST),
-         county_icp = as.integer(ICPSRCTY))
-
-overlap = st_intersection(cty, res) |>
-  st_drop_geometry() |>
-  distinct(state_icp, county_icp) |>
-  arrange(state_icp, county_icp) |>
-  mutate(res_cty = 1)
-
-aian_res = aian_filtered |>
-  mutate(state_icp = case_when(
-    statefip_1940 == 1  ~ 41,    # Alabama
-    statefip_1940 == 2  ~ 81,   # Alaska
-    statefip_1940 == 4  ~ 61,    # Arizona
-    statefip_1940 == 5  ~ 42,    # Arkansas
-    statefip_1940 == 6  ~ 71,    # California
-    statefip_1940 == 8  ~ 62,    # Colorado
-    statefip_1940 == 9  ~ 1,    # Connecticut
-    statefip_1940 == 10 ~ 11,    # Delaware
-    statefip_1940 == 11 ~ 98,    # DC
-    statefip_1940 == 12 ~ 43,    # Florida
-    statefip_1940 == 13 ~ 44,   # Georgia
-    statefip_1940 == 15 ~ 82,   # Hawaii
-    statefip_1940 == 16 ~ 63,   # Idaho
-    statefip_1940 == 17 ~ 21,   # Illinois
-    statefip_1940 == 18 ~ 22,   # Indiana
-    statefip_1940 == 19 ~ 31,   # Iowa
-    statefip_1940 == 20 ~ 32,   # Kansas
-    statefip_1940 == 21 ~ 51,   # Kentucky
-    statefip_1940 == 22 ~ 45,   # Louisiana
-    statefip_1940 == 23 ~ 2,   # Maine
-    statefip_1940 == 24 ~ 52,   # Maryland
-    statefip_1940 == 25 ~ 3,   # Massachusetts
-    statefip_1940 == 26 ~ 23,   # Michigan
-    statefip_1940 == 27 ~ 33,   # Minnesota
-    statefip_1940 == 28 ~ 46,   # Mississippi
-    statefip_1940 == 29 ~ 34,   # Missouri
-    statefip_1940 == 30 ~ 64,   # Montana
-    statefip_1940 == 31 ~ 35,   # Nebraska
-    statefip_1940 == 32 ~ 65,   # Nevada
-    statefip_1940 == 33 ~ 4,   # New Hampshire
-    statefip_1940 == 34 ~ 12,   # New Jersey
-    statefip_1940 == 35 ~ 66,   # New Mexico
-    statefip_1940 == 36 ~ 13,   # New York
-    statefip_1940 == 37 ~ 47,   # North Carolina
-    statefip_1940 == 38 ~ 36,   # North Dakota
-    statefip_1940 == 39 ~ 24,   # Ohio
-    statefip_1940 == 40 ~ 53,   # Oklahoma
-    statefip_1940 == 41 ~ 72,   # Oregon
-    statefip_1940 == 42 ~ 14,   # Pennsylvania
-    statefip_1940 == 44 ~ 5,   # Rhode Island
-    statefip_1940 == 45 ~ 48,   # South Carolina
-    statefip_1940 == 46 ~ 37,   # South Dakota
-    statefip_1940 == 47 ~ 54,   # Tennessee
-    statefip_1940 == 48 ~ 49,   # Texas
-    statefip_1940 == 49 ~ 67,   # Utah
-    statefip_1940 == 50 ~ 6,   # Vermont
-    statefip_1940 == 51 ~ 40,   # Virginia
-    statefip_1940 == 53 ~ 73,   # Washington
-    statefip_1940 == 54 ~ 56,   # West Virginia
-    statefip_1940 == 55 ~ 25,   # Wisconsin
-    statefip_1940 == 56 ~ 68,   # Wyoming
-    TRUE ~ NA_real_)) #|>
-  rename("county_icp" = "countyicp_1940") |>
-  left_join(overlap, by = c("state_icp", "county_icp")) |>
-  mutate(res_cty = replace_na(res_cty, 0))
-
-write_csv(aian_res, "aian-igm/data/aian_filtered.csv")
-write_csv(overlap, "aian-igm/data/res_counties.csv")
+write_csv(aian_merged, "data/aian_merged.csv")
