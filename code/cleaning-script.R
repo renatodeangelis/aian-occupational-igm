@@ -173,7 +173,8 @@ aian_merged = aian_clean |>
       v = c_across(starts_with("lit_pop"))
       if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE)}) |>
   ungroup() |>
-  select(-starts_with("lit_19"), -starts_with("lit_pop_"), -sex_1940) |>
+  filter(school_1940 == 1) |>
+  select(-starts_with("lit_19"), -starts_with("lit_pop_"), -sex_1940, -school_1940) |>
   relocate(statefip_1940, .after = histid_1940) |>
   relocate(starts_with("statefip_pop"), .after = histid_pop_1940) |>
   relocate(birthyr_son, .after = histid_1940) |>
@@ -181,8 +182,7 @@ aian_merged = aian_clean |>
   relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son_alt) |>
   relocate(lit_son, .after = educd_1940) |>
-  relocate(school_1940, .after = lit_son) |>
   relocate(lit_pop, .after = educd_pop_1940) |>
   relocate(starts_with("w_parent"), .after = last_col())
 
-#write_csv(aian_merged, "data/aian_merged.csv")
+write_csv(aian_merged, "data/aian_merged.csv")
