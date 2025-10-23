@@ -101,25 +101,11 @@ aian_ps = aian_comb %>%
   mutate(p_hat = predict(ps_model, newdata =., type = "response")) |>
   mutate(w_atc = if_else(linked == 1,
                          (1 - p_hat) / p_hat, NA_real_)) |>
-  filter(linked == 1)
-
-comb_for_bal = aian_ps |>
-  mutate(w_for_nal = if_else(is.na(w_atc_norm), 1, w_atc_norm))
-
-bal.tab(linked ~ age_group + meso_son + region + res_cty,
-        data = comb_for_bal,
-        weights = comb_for_bal$w_for_nal,
-        estimand = "ATC",
-        un = TRUE)
-
-aian_weighted = aian_ps |>
   filter(linked == 1) |>
-  select(-linked, -(year:histid), -p_hat) |>
-  rename(weight = w_atc)
+  select(where(~ !all(is.na(.))), -linked) |>
+  relocate(starts_with("w_parent"), .after = last_col())
 
-
-write_csv(aian_weighted, "aian_weighted.csv")
-
+write_csv(aian_ps, "aian_weighted.csv")
 
 
 
