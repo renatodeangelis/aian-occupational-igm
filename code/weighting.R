@@ -3,77 +3,97 @@ library(readr)
 library(tidyr)
 library(cobalt)
 
-aian_filtered = read_csv("data/aian_merged.csv")
-res_counties = read_csv("data/res_counties.csv")
+aian_merged = read_csv("data/aian_merged.csv") |>
+  mutate(linked = 1,
+         region = case_when(
+           statefip_1940 %in% c(8, 16, 32, 49, 56)  ~ "basin",
+           statefip_1940 == 6                         ~ "cali",
+           statefip_1940 %in% c(27, 55)               ~ "lakes",
+           statefip_1940 %in% c(17, 18, 26, 39)       ~ "midwest",
+           statefip_1940 == 37                        ~ "nc",
+           statefip_1940 %in% c(9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "ne",
+           statefip_1940 %in% c(30, 38, 46)           ~ "plains",
+           statefip_1940 %in% c(41, 53)               ~ "nw",
+           statefip_1940 == 40                        ~ "ok",
+           statefip_1940 %in% c(19, 20, 29, 31)       ~ "prairie",
+           statefip_1940 %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54) ~ "south",
+           statefip_1940 %in% c(4, 35)                ~ "sw",
+           TRUE ~ NA_character_),
+         education = case_when(
+           educd_1940 == 2 ~ "0",
+           educd_1940 %in% 14:17 ~ "1-4",
+           educd_1940 %in% 22:26 ~ "5-8",
+           educd_1940 %in% 30:60 ~ "9-12",
+           educd_1940 %in% 70:113 ~ "12+",
+           educd_1940 == 999 ~ "missing"))
 
-setwd("~/Downloads")
-aian_full = read_csv("usa_00020.csv") |>
+classify_meso = function(occ, split_farmer = TRUE) {
+  farmer_codes = c(100, 123)
+  prof_codes = c(0:99, 200:290)
+  crafts_codes = c(762, 773, 781, 782)
+  
+  case_when(
+    occ %in% farmer_codes ~ "farmer",
+    split_farmer & occ %in% 810:840 ~ "farmworker",
+    occ %in% prof_codes ~ "prof",
+    occ %in% 300:490 ~ "clerical",
+    occ %in% 500:594 | occ %in% crafts_codes ~ "crafts",
+    occ %in% 595:970 & !(occ %in% crafts_codes) & !(split_farmer & occ %in% 810:840) ~ "unskilled",
+    occ > 970 ~ "unemp"
+  )
+}
+
+classify_macro = function(meso) {
+  case_when(
+    meso %in% c("farmer", "farmworker") ~ "farming",
+    meso %in% c("prof", "clerical") ~ "nonmanual",
+    meso %in% c("crafts", "unskilled") ~ "manual",
+    meso == "unemp" ~ "unemp")
+}
+
+aian_full = read_csv(
+  file = "https://www.dropbox.com/scl/fi/imhz0zujc9dfhx3dc6kox/usa_00021.csv?rlkey=1b5xq14od1cky4iyvfbrob413&st=ndwbat7q&dl=1") |>
   janitor::clean_names() |>
-  filter(age < 45) |>
-  mutate(linked = 0) |>
-  mutate(occ_meso = case_when(
-    occ1950 == 100 | occ1950 == 123 ~ "farming",
-    occ1950 <= 99 | (occ1950 >= 200 & occ1950 <= 290) ~ "prof",
-    occ1950 >= 300 & occ1950 <= 490 ~ "clerical",
-    (occ1950 >= 500 & occ1950 <= 594) | occ1950 == 762 |
-      occ1950 == 773 | occ1950 == 781 | occ1950 == 782 ~ "crafts",
-    occ1950 >= 595 & occ1950 <= 970 & occ1950 != 762 &
-      occ1950 != 773 & occ1950 != 781 & occ1950 != 782 ~ "unskilled",
-    occ1950 > 970 ~ "unemp")) |>
-  mutate(occ_macro = case_when(
-    occ_meso == "farming" ~ "farming",
-    occ_meso == "prof" | occ_meso == "clerical" ~ "white_col",
-    occ_meso == "crafts" | occ_meso == "unskilled" ~ "blue_col",
-    occ_meso == "unemp" ~ "unemp")) |>
-  mutate(region = case_when(
-    stateicp %in% c(62, 63, 65, 67, 68) ~ "basin",
-    stateicp == 71 ~ "cali",
-    stateicp %in% c(33, 25) ~ "lakes",
-    stateicp %in% c(21, 22, 23, 24) ~ "midwest",
-    stateicp == 47 ~ "nc",
-    stateicp %in% c(1, 11, 2, 52, 3, 4, 12, 13, 14, 5, 6, 98) ~ "ne",
-    stateicp %in% c(64, 36, 37) ~ "plains",
-    stateicp %in% c(72, 73) ~ "nw",
-    stateicp == 53 ~ "ok",
-    stateicp %in% c(31, 32, 34, 35) ~ "prairie",
-    stateicp %in% c(41, 42, 43, 44, 51, 45, 46, 48, 54, 49, 40, 56) ~ "south",
-    stateicp %in% c(61, 66) ~ "sw",
-    TRUE ~ NA_character_)) |>
-  rename(state_icp = stateicp,
-         county_icp = countyicp,
-         educd_1940 = educd)
+  filter(age < 45,
+         school == 1) |>
+  mutate(linked = 0,
+         birthyr_son = 1940 - age,
+         meso_son = classify_meso(occ1950),
+         macro_son = classify_macro(meso_son),
+         meso_son_alt = classify_meso(occ1950, split_farmer = FALSE),
+         macro_son_alt = classify_macro(meso_son_alt),
+         region = case_when(
+           statefip %in% c(8, 16, 32, 49, 56)  ~ "basin",
+           statefip == 6                         ~ "cali",
+           statefip %in% c(27, 55)               ~ "lakes",
+           statefip %in% c(17, 18, 26, 39)       ~ "midwest",
+           statefip == 37                        ~ "nc",
+           statefip %in% c(9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "ne",
+           statefip %in% c(30, 38, 46)           ~ "plains",
+           statefip %in% c(41, 53)               ~ "nw",
+           statefip == 40                        ~ "ok",
+           statefip %in% c(19, 20, 29, 31)       ~ "prairie",
+           statefip %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54) ~ "south",
+           statefip %in% c(4, 35)                ~ "sw",
+           TRUE ~ NA_character_),
+         education = case_when(
+           educd == 2 ~ "0",
+           educd %in% 14:17 ~ "1-4",
+           educd %in% 22:26 ~ "5-8",
+           educd %in% 30:60 ~ "9-12",
+           educd %in% 70:113 ~ "12+",
+           educd == 999 ~ "missing")) |>
+  rename(statefip_1940 = statefip)
 
-aian_filtered = aian_filtered |>
-  mutate(linked = 1) |>
-  rename(occ_meso = son_meso,
-         occ_macro = son_macro,
-#         stateicp = state_icp,
-         age = age_1940) #|>
-  mutate(region = case_when(
-    stateicp %in% c(62, 63, 65, 67, 68) ~ "basin",
-    stateicp == 71 ~ "cali",
-    stateicp %in% c(33, 25) ~ "lakes",
-    stateicp %in% c(21, 22, 23, 24) ~ "midwest",
-    stateicp == 47 ~ "nc",
-    stateicp %in% c(1, 11, 2, 52, 3, 4, 12, 13, 14, 5, 6, 98) ~ "ne",
-    stateicp %in% c(64, 36, 37) ~ "plains",
-    stateicp %in% c(72, 73) ~ "nw",
-    stateicp == 53 ~ "ok",
-    stateicp %in% c(31, 32, 34, 35) ~ "prairie",
-    stateicp %in% c(41, 42, 43, 44, 51, 45, 46, 48, 54, 49, 40, 56) ~ "south",
-    stateicp %in% c(61, 66) ~ "sw",
-    TRUE ~ NA_character_))
-
-aian_comb = bind_rows(aian_filtered, aian_full) |>
+aian_comb = bind_rows(aian_merged, aian_full) |>
   mutate(
-    age_group = cut(age, breaks = c(20, 25, 30, 35, 40, 45), right = FALSE),
-    res_cty = as.factor(res_cty),
-    occ_meso = as.factor(occ_meso),
-    region = as.factor(region))
+    meso_son = as.factor(meso_son),
+    meso_son_alt = as.factor(meso_son_alt),
+    region = as.factor(region),
+    education = as.factor(education),
+    birthyr_son = as.factor(birthyr_son))
 
-sum_linked = sum(aian_ps$linked == 1)
-
-ps_model = glm(linked ~ age_group + occ_meso,
+ps_model = glm(linked ~ birthyr_son + meso_son + region + education,
             data = aian_comb,
             family = binomial)
 
@@ -81,14 +101,12 @@ aian_ps = aian_comb %>%
   mutate(p_hat = predict(ps_model, newdata =., type = "response")) |>
   mutate(w_atc = if_else(linked == 1,
                          (1 - p_hat) / p_hat, NA_real_)) |>
-  mutate(w_atc_norm = if_else(linked == 1,
-                              w_atc * (sum_linked / sum(w_atc[linked == 1])),
-                              NA_real_))
+  filter(linked == 1)
 
 comb_for_bal = aian_ps |>
   mutate(w_for_nal = if_else(is.na(w_atc_norm), 1, w_atc_norm))
 
-bal.tab(linked ~ age_group + occ_meso + region + res_cty,
+bal.tab(linked ~ age_group + meso_son + region + res_cty,
         data = comb_for_bal,
         weights = comb_for_bal$w_for_nal,
         estimand = "ATC",
@@ -99,7 +117,7 @@ aian_weighted = aian_ps |>
   select(-linked, -(year:histid), -p_hat) |>
   rename(weight = w_atc)
 
-setwd("~/aian-igm/data")
+
 write_csv(aian_weighted, "aian_weighted.csv")
 
 
