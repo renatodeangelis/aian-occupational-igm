@@ -1,7 +1,6 @@
 library(dplyr)
 library(readr)
 library(tidyr)
-library(cobalt)
 
 aian_merged = read_csv("data/aian_merged.csv") |>
   mutate(linked = 1,
@@ -105,7 +104,7 @@ aian_ps = aian_comb %>%
   select(where(~ !all(is.na(.))), -linked) |>
   relocate(starts_with("w_parent"), .after = last_col())
 
-write_csv(aian_ps, "aian_weighted.csv")
+write_csv(aian_ps, "data/aian_weighted.csv")
 
 
 

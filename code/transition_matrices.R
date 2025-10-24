@@ -9,15 +9,8 @@ library(rlang)
 library(purrr)
 library(tigris)
 
-macro_order = c("farming", "blue_col", "white_col", "unemp")
-meso_order = c("farming", "unskilled", "crafts", "clerical", "prof", "unemp")
 
-data = read_csv("data/aian_weighted.csv") |>
-  mutate(
-    dad_macro = factor(dad_macro, levels = macro_order),
-    occ_macro = factor(occ_macro, levels = macro_order),
-    dad_meso = factor(dad_meso, levels = meso_order),
-    occ_meso = factor(occ_meso, levels = meso_order))
+data = read_csv("data/aian_weighted.csv")
 
 ################################################################################
 ############################### BASIC MEASURES #################################
