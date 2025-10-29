@@ -9,8 +9,36 @@ library(rlang)
 library(purrr)
 library(tigris)
 
-
 data = read_csv("data/aian_weighted.csv")
+
+## DATA DESCRIPTION
+
+desc_main = data |>
+  summarise(birthyr_pop_mean = weighted.mean(birthyr_pop, w_atc),
+            birthyr_pop_sd = wtd.sd(birthyr_pop, w_atc),
+            birthyr_son_mean = weighted.mean(birthyr_son, w_atc),
+            birthyr_son_sd = wtd.sd(birthyr_son, w_atc))
+
+desc_region = data |>
+  group_by(region) |>
+  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  mutate(prop = round(wsum / sum(wsum) * 100, 1)) |>
+  select(-wsum) |>
+  arrange(region)
+
+desc_meso_pop = data |>
+  group_by(meso_pop) |>
+  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  mutate(prop = wsum / sum(wsum) * 100) |>
+  select(-wsum) |>
+  arrange(meso_pop)
+
+desc_meso_son = data |>
+  group_by(meso_son) |>
+  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  mutate(prop = wsum / sum(wsum) * 100) |>
+  select(-wsum) |>
+  arrange(meso_son)
 
 ################################################################################
 ############################### BASIC MEASURES #################################
@@ -1002,21 +1030,4 @@ im_nonres_mid_plot <- ggplot(im_boot_nonres_mid, aes(x = t, y = est, color = ori
 
 im_combined <- im_res_mid_plot + im_nonres_mid_plot + 
   plot_layout(widths = c(2, 2))
-
-################################################################################
-
-wtd_sd = function(x, w) {
-  m = weighted.mean(x, w, na.rm = TRUE)
-  sqrt( sum(w * (x - m)^2, na.rm = TRUE) / sum(w, na.rm = TRUE) )
-}
-
-demo = data |>
-  summarise(age = weighted.mean(age, weight),
-            res_cty_ok = weighted.mean(res_cty_ok, weight))
-
-occ = data |>
-  group_by(occ_macro) |>
-  summarise(wsum = sum(weight), .groups = "drop") |>
-  mutate(prop = wsum / sum(wsum)) |>
-  arrange(occ_macro)
 
