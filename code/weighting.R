@@ -101,6 +101,7 @@ aian_ps = aian_comb %>%
   mutate(w_atc = if_else(linked == 1,
                          (1 - p_hat) / p_hat, NA_real_)) |>
   filter(linked == 1) |>
+  mutate(w_atc_norm = w_atc * n() / sum(w_atc))
   select(where(~ !all(is.na(.))), -linked) |>
   relocate(starts_with("w_parent"), .after = last_col())
 

@@ -8,6 +8,7 @@ library(expm)
 library(rlang)
 library(purrr)
 library(tigris)
+library(jtools)
 
 data = read_csv("data/aian_weighted.csv")
 
