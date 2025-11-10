@@ -102,7 +102,7 @@ aian_ps = aian_comb %>%
                          (1 - p_hat) / p_hat, NA_real_)) |>
   filter(linked == 1) |>
   mutate(w_atc_norm = w_atc * n() / sum(w_atc))
-  select(where(~ !all(is.na(.))), -linked) |>
+  select(-linked, -(countyicp:p_hat)) |>
   relocate(starts_with("w_parent"), .after = last_col())
 
 write_csv(aian_ps, "data/aian_weighted.csv")
