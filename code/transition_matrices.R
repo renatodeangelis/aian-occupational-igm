@@ -15,31 +15,40 @@ data = read_csv("data/aian_weighted.csv")
 ## DATA DESCRIPTION
 
 desc_main = data |>
-  summarise(birthyr_pop_mean = weighted.mean(birthyr_pop, w_atc),
-            birthyr_pop_sd = wtd.sd(birthyr_pop, w_atc),
-            birthyr_son_mean = weighted.mean(birthyr_son, w_atc),
-            birthyr_son_sd = wtd.sd(birthyr_son, w_atc))
+  mutate(age_pop = 1940 - birthyr_pop,
+         age_son = 1940 - birthyr_son) |>
+  summarise(age_pop_mean = weighted.mean(age_pop, w_atc_norm),
+            age_pop_sd = wtd.sd(age_pop, w_atc_norm),
+            age_son_mean = weighted.mean(age_son, w_atc_norm),
+            age_son_sd = wtd.sd(age_son, w_atc_norm))
 
 desc_region = data |>
   group_by(region) |>
-  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  summarise(wsum = sum(w_atc_norm), .groups = "drop") |>
   mutate(prop = round(wsum / sum(wsum) * 100, 1)) |>
   select(-wsum) |>
   arrange(region)
 
 desc_meso_pop = data |>
   group_by(meso_pop) |>
-  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  summarise(wsum = sum(w_atc_norm), .groups = "drop") |>
   mutate(prop = wsum / sum(wsum) * 100) |>
   select(-wsum) |>
   arrange(meso_pop)
 
 desc_meso_son = data |>
   group_by(meso_son) |>
-  summarise(wsum = sum(w_atc), .groups = "drop") |>
+  summarise(wsum = sum(w_atc_norm), .groups = "drop") |>
   mutate(prop = wsum / sum(wsum) * 100) |>
   select(-wsum) |>
   arrange(meso_son)
+
+desc_educd = data |>
+  group_by(education) |>
+  summarise(wsum = sum(w_atc_norm), .groups = "drop") |>
+  mutate(prop = wsum / sum(wsum) * 100) |>
+  select(-wsum) |>
+  arrange(education)
 
 ################################################################################
 ############################### BASIC MEASURES #################################
@@ -48,7 +57,7 @@ desc_meso_son = data |>
 pi_0 = function(data, level) {
   df = data |> 
     group_by({{ level }}) |>
-    summarise(total_w = sum(weight),
+    summarise(total_w = sum(w_atc_norm),
               .groups = "drop") |>
     mutate(pi0 = total_w / sum(total_w)) |>
     arrange({{ level }})
@@ -68,7 +77,7 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
   df = data |>
     group_by( !!dad_sym, !!son_sym ) |>
     summarise(
-      n_w = sum(weight),
+      n_w = sum(w_atc_norm),
       .groups = "drop"
     ) |>
     group_by( !!dad_sym ) |>
@@ -109,20 +118,20 @@ p_upward = function(data,
                     level = c("macro", "meso"),
                     farming = TRUE,
                     unemp = FALSE,
-                    weight = weight) {
+                    w_atc_norm = w_atc_norm) {
   
   level = match.arg(level)
   
   data |>
     mutate(upward =
-             (unemp & dad_macro == "unemp" & occ_macro != "unemp") |
-             (farming & dad_macro == "farming" & occ_macro == "white_col") |
+             (unemp & macro_pop == "unemp" & macro_son != "unemp") |
+             (farming & macro_pop == "farming" & macro_son == "white_col") |
              if (level == "macro")
-               (dad_macro == "blue_col" & occ_macro == "white_col")
+               (macro_pop == "blue_col" & macro_son == "white_col")
            else 
-             (dad_meso == "unskilled" & (occ_macro == "white_col" | occ_meso == "crafts")) |
+             (dad_meso == "unskilled" & (macro_son == "white_col" | occ_meso == "crafts")) |
              (dad_meso == "clerical" & occ_meso == "prof")) |>
-    summarise(upward = weighted.mean(as.numeric(upward), w = {{ weight }})) |>
+    summarise(upward = w_atc_normed.mean(as.numeric(upward), w = {{ w_atc_norm }})) |>
     pull(upward)
 }
 
@@ -135,27 +144,27 @@ p_downward = function(data,
                       level = c("macro", "meso"),
                       farming = TRUE,
                       unemp = FALSE,
-                      weight = weight) {
+                      w_atc_norm = w_atc_norm) {
   
   level = match.arg(level)
   
   data |>
     mutate(downward = 
-             (unemp & dad_macro != "unemp" & occ_macro == "unemp") |
-             (farming & dad_macro == "white_col" & occ_macro == "farming") |
+             (unemp & macro_pop != "unemp" & macro_son == "unemp") |
+             (farming & macro_pop == "white_col" & macro_son == "farming") |
              if (level == "macro")
-               (dad_macro == "white_col" & occ_macro == "blue_col")
+               (macro_pop == "white_col" & macro_son == "blue_col")
            else
-             ((dad_macro == "white_col" | dad_meso == "crafts") & occ_meso == "unskilled") |
+             ((macro_pop == "white_col" | dad_meso == "crafts") & occ_meso == "unskilled") |
              (dad_meso == "prof" & occ_meso == "clerical")) |>
-    summarise(downward = weighted.mean(as.numeric(downward), w = {{ weight }})) |>
+    summarise(downward = w_atc_normed.mean(as.numeric(downward), w = {{ w_atc_norm }})) |>
     pull(downward)
 }
 
-shorrocks = function(data, level_dad, level_son, weight = weight) {
+shorrocks = function(data, level_dad, level_son, w_atc_norm = w_atc_norm) {
   data |>
     mutate(.same = {{ level_dad }} != {{ level_son }}) |>
-    summarise(prop = weighted.mean(as.numeric(.same), w = {{ weight }}, na.rm = TRUE)) |>
+    summarise(prop = w_atc_normed.mean(as.numeric(.same), w = {{ w_atc_norm }}, na.rm = TRUE)) |>
     pull(prop)
 }
 
@@ -167,7 +176,8 @@ first_passage = function(p_mat) {
 ############################## ADVANCED MEASURES ###############################
 ################################################################################
 
-with_boot = function(data, stat_fn, R = 200, ...) {
+with_boot = function(data, stat_fn, R = 1000, .seed = NULL, ...) {
+  if (!is.null(.seed)) set.seed(.seed)
   args_q = rlang::enquos(...)
   N = nrow(data)
   stat_call = function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
@@ -187,8 +197,7 @@ with_boot = function(data, stat_fn, R = 200, ...) {
 
 boot_pmatrix_ci = function(
     data, level_dad, level_son,
-    R = 1000, conf = 0.95, .seed = NULL
-){
+    R = 1000, conf = 0.95, .seed = NULL){
   if (!is.null(.seed)) set.seed(.seed)
   
   dad_sym = rlang::ensym(level_dad)
@@ -337,23 +346,22 @@ identify_generators = function(data, level_dad, level_son, ts = 0:5) {
 ################################################################################
 
 ## MACRO
-## RESERVATION ONLY
+p_mat_macro = boot_pmatrix_ci(
+  data, macro_pop, macro_son,
+  R = 1000, conf = 0.95, .seed = 123)
 
-res = data |> filter(res_cty == 1 & statefip_1940 != 40)
-
-p_mat_res = p_matrix(res, dad_macro, occ_macro, matrix = FALSE)
-g_res = ggplot(
-  p_mat_res |> 
-    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
-  aes(x = occ_macro, y = dad_macro, fill = P)) +
+g_macro = ggplot(
+  p_mat_macro |> 
+    mutate(macro_pop = factor(macro_pop, levels = rev(unique(macro_pop)))),
+  aes(x = macro_son, y = macro_pop, fill = est)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", P)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(x = "Son occupation",
-       y = "Father occupation",
+  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
+            vjust = 0.3, size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(x = "Son's occupation",
+       y = "Father's occupation",
        fill = "Transition Prob.",
-       title = "P") +
+       title = expression(P)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1),
         axis.text.y = element_text(angle = 45, hjust = 1),
@@ -363,17 +371,17 @@ g_res = ggplot(
         legend.position = "bottom",
         plot.title = element_text(hjust = 0.5))
 
-pi0_vec_res = pi_0(res, dad_macro)
-df_pi0_res = tibble(
-  father = names(pi0_vec_res),
-  pi0 = as.numeric(pi0_vec_res)) |>
+pi0_vec_macro = pi_0(data, macro_pop)
+df_pi0_macro = tibble(
+  father = names(pi0_vec_macro),
+  pi0 = as.numeric(pi0_vec_macro)) |>
   mutate(father = factor(father, levels = rev(unique(father))))
-g0_res = ggplot(df_pi0_res, aes(x = 1, y = father, fill = pi0)) +
+g0_macro = ggplot(df_pi0_macro, aes(x = 1, y = father, fill = pi0)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", pi0)),
             size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π_0") +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi[0])) +
   theme_minimal() +
   theme(axis.title.x = element_blank(),
         axis.text.x = element_blank(),
@@ -384,17 +392,17 @@ g0_res = ggplot(df_pi0_res, aes(x = 1, y = father, fill = pi0)) +
         legend.position = "none",
         plot.title = element_text(hjust = 0.5))
 
-steady_res = pi_star(p_matrix(res, dad_macro, occ_macro, TRUE))
-df_pi_star_res = tibble(
-  father = names(steady_res),
-  pi_star = as.numeric(steady_res)) |>
+steady_macro = pi_star(p_matrix(data, macro_pop, macro_son, TRUE))
+df_pi_star_macro = tibble(
+  father = names(steady_macro),
+  pi_star = as.numeric(steady_macro)) |>
   mutate(father = factor(father, levels = rev(unique(father))))
-g_star_res = ggplot(df_pi_star_res, aes(x = 1, y = father, fill = pi_star)) +
+g_star_macro = ggplot(df_pi_star_macro, aes(x = 1, y = father, fill = pi_star)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", pi_star)),
             size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π*") +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(title = expression(pi^"*")) +
   theme_minimal() +
   theme(axis.title.x = element_blank(),
         axis.text.x = element_blank(),
@@ -405,95 +413,23 @@ g_star_res = ggplot(df_pi_star_res, aes(x = 1, y = father, fill = pi_star)) +
         legend.position = "none",
         plot.title = element_text(hjust = 0.5))
 
-combined_plot_res = g_res + g0_res + g_star_res + plot_layout(widths = c(6, 1, 1))
-
-## NONRESERVATION ONLY
-
-nonres = data |> filter(res_cty == 0 | statefip_1940 == 40)
-
-p_mat_nonres = p_matrix(nonres, dad_macro, occ_macro, matrix = FALSE)
-g_nonres = ggplot(
-  p_mat_nonres |> 
-    mutate(dad_macro = factor(dad_macro, levels = rev(unique(dad_macro)))),
-  aes(x = occ_macro, y = dad_macro, fill = P)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", P)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(x = "Son occupation",
-       y = "Father occupation",
-       fill = "Transition Prob.",
-       title = "P") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title = element_text(size = 10),
-        legend.position = "bottom",
-        plot.title = element_text(hjust = 0.5))
-
-pi0_vec_nonres = pi_0(nonres, dad_macro)
-df_pi0_nonres = tibble(
-  father = names(pi0_vec_nonres),
-  pi0 = as.numeric(pi0_vec_nonres)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-g0_nonres = ggplot(df_pi0_nonres, aes(x = 1, y = father, fill = pi0)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi0)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π_0") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-steady_nonres = pi_star(p_matrix(nonres, dad_macro, occ_macro, TRUE))
-df_pi_star_nonres = tibble(
-  father = names(steady_nonres),
-  pi_star = as.numeric(steady_nonres)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π*") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
-  plot_layout(widths = c(6, 1, 1))
+combined_plot_macro = g_macro + g0_macro + g_star_macro + plot_layout(widths = c(6, 1, 1))
 
 ## MESO
-## RESERVATION ONLY
+p_mat_meso = boot_pmatrix_ci(
+  data, meso_pop, meso_son,
+  R = 1000, conf = 0.95, .seed = 123)
 
-res = data |> filter(res_cty == 1 & statefip_1940 != 40)
-
-p_mat_res = p_matrix(res, dad_meso, occ_meso, matrix = FALSE)
-g_res = ggplot(
-  p_mat_res |> 
-    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
-  aes(x = occ_meso, y = dad_meso, fill = P)) +
+g_meso = ggplot(
+  p_mat_meso |> 
+    mutate(meso_pop = factor(meso_pop, levels = rev(unique(meso_pop)))),
+  aes(x = meso_son, y = meso_pop, fill = est)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", P)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(x = "Son occupation",
-       y = "Father occupation",
+  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
+            vjust = 0.3, size = 3) +
+  scale_fill_gradient(low = "white", high = "firebrick") +
+  labs(x = "Son's occupation",
+       y = "Father's occupation",
        fill = "Transition Prob.",
        title = "P") +
   theme_minimal() +
@@ -505,308 +441,66 @@ g_res = ggplot(
         legend.position = "bottom",
         plot.title = element_text(hjust = 0.5))
 
-pi0_vec_res = pi_0(res, dad_meso)
-df_pi0_res = tibble(
-  father = names(pi0_vec_res),
-  pi0 = as.numeric(pi0_vec_res)) |>
+pi0_vec_meso = pi_0(data, meso_pop)
+df_pi0_meso = tibble(
+  father = names(pi0_vec_meso),
+  pi0 = as.numeric(pi0_vec_meso)) |>
   mutate(father = factor(father, levels = rev(unique(father))))
-g0_res = ggplot(df_pi0_res, aes(x = 1, y = father, fill = pi0)) +
+g0_meso = ggplot(df_pi0_meso, aes(x = 1, y = father, fill = pi0)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", pi0)),
             size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π_0") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-steady_res = pi_star(p_matrix(res, dad_meso, occ_meso, TRUE))
-df_pi_star_res = tibble(
-  father = names(steady_res),
-  pi_star = as.numeric(steady_res)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-g_star_res = ggplot(df_pi_star_res, aes(x = 1, y = father, fill = pi_star)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π*") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-combined_plot_res = g_res + g0_res + g_star_res + plot_layout(widths = c(6, 1, 1))
-
-## NONRESERVATION ONLY
-
-nonres = data |> filter(res_cty == 0 | statefip_1940 == 40)
-
-p_mat_nonres = p_matrix(nonres, dad_meso, occ_meso, matrix = FALSE)
-g_nonres = ggplot(
-  p_mat_nonres |> 
-    mutate(dad_meso = factor(dad_meso, levels = rev(unique(dad_meso)))),
-  aes(x = occ_meso, y = dad_meso, fill = P)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", P)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(x = "Son occupation",
-       y = "Father occupation",
-       fill = "Transition Prob.",
-       title = "P") +
-  theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.x = element_blank(),
-        axis.ticks.y = element_blank(),
-        axis.title = element_text(size = 10),
-        legend.position = "bottom",
-        plot.title = element_text(hjust = 0.5))
-
-pi0_vec_nonres = pi_0(nonres, dad_meso)
-df_pi0_nonres = tibble(
-  father = names(pi0_vec_nonres),
-  pi0 = as.numeric(pi0_vec_nonres)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-g0_nonres = ggplot(df_pi0_nonres, aes(x = 1, y = father, fill = pi0)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi0)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π_0") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-steady_nonres = pi_star(p_matrix(nonres, dad_meso, occ_meso, TRUE))
-df_pi_star_nonres = tibble(
-  father = names(steady_nonres),
-  pi_star = as.numeric(steady_nonres)) |>
-  mutate(father = factor(father, levels = rev(unique(father))))
-g_star_nonres = ggplot(df_pi_star_nonres, aes(x = 1, y = father, fill = pi_star)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)),
-            size = 3, color = "black") +
-  scale_fill_gradient(low = "white", high = "steelblue") +
-  labs(title = "π*") +
-  theme_minimal() +
-  theme(axis.title.x = element_blank(),
-        axis.text.x = element_blank(),
-        axis.ticks.x = element_blank(),
-        axis.title.y = element_blank(),
-        axis.text.y = element_text(angle = 45, hjust = 1),
-        axis.ticks.y = element_blank(),
-        legend.position = "none",
-        plot.title = element_text(hjust = 0.5))
-
-combined_plot_nonres = g_nonres + g0_nonres + g_star_nonres + 
-  plot_layout(widths = c(6, 1, 1))
-
-## MID
-
-## RESERVATION ONLY
-
-ci_res = boot_pmatrix_ci(
-  res, dad_mid, occ_mid,
-  R = 1000, conf = 0.95, .seed = 123
-) |>
-  mutate(
-    dad_mid = factor(dad_mid, levels = rev(mid_order)),
-    occ_mid = factor(occ_mid, levels = mid_order)
-  )
-
-g_mid_res = ggplot(ci_res, aes(x = occ_mid, y = dad_mid, fill = est)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
-            vjust = 0.3, size = 3) +
-  scale_fill_gradient(low = "white", high = "firebrick") +
-  labs(
-    x = "Son occupation",
-    y = "Father occupation",
-    fill = "Transition Prob.",
-    title = "P"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text.y = element_text(angle = 45, hjust = 1),
-    axis.ticks = element_blank(),
-    axis.title = element_text(size = 10),
-    legend.position = "bottom",
-    plot.title = element_text(hjust = 0.5)
-  )
-
-pi0_vec_mid_res = pi_0(res, dad_mid)
-df_pi0_mid_res = tibble(
-  father = names(pi0_vec_mid_res),
-  pi0    = as.numeric(pi0_vec_mid_res)
-) |>
-  mutate(father = factor(father, levels = rev(mid_order)))
-
-g0_mid_res = ggplot(df_pi0_mid_res, aes(x = 1, y = father, fill = pi0)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi0)), size = 3) +
   scale_fill_gradient(low = "white", high = "firebrick") +
   labs(title = expression(pi[0])) +
   theme_minimal() +
-  theme(
-    axis.title.x = element_blank(),
-    axis.text.x  = element_blank(),
-    axis.ticks.x = element_blank(),
-    axis.title.y = element_blank(),
-    axis.text.y  = element_text(angle = 45, hjust = 1),
-    axis.ticks.y = element_blank(),
-    legend.position = "none",
-    plot.title = element_text(hjust = 0.5)
-  )
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
-steady_mid_res = pi_star(p_matrix(res, dad_mid, occ_mid, TRUE))
-df_pi_star_mid_res = tibble(
-  father  = names(steady_mid_res),
-  pi_star = as.numeric(steady_mid_res)
-) |>
-  mutate(father = factor(father, levels = rev(mid_order)))
-
-g_star_mid_res = ggplot(df_pi_star_mid_res, aes(x = 1, y = father, fill = pi_star)) +
+steady_meso = pi_star(p_matrix(data, meso_pop, meso_son, TRUE))
+df_pi_star_meso = tibble(
+  father = names(steady_meso),
+  pi_star = as.numeric(steady_meso)) |>
+  mutate(father = factor(father, levels = rev(unique(father))))
+g_star_meso = ggplot(df_pi_star_meso, aes(x = 1, y = father, fill = pi_star)) +
   geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)), size = 3) +
+  geom_text(aes(label = sprintf("%.2f", pi_star)),
+            size = 3, color = "black") +
   scale_fill_gradient(low = "white", high = "firebrick") +
   labs(title = expression(pi^"*")) +
   theme_minimal() +
-  theme(
-    axis.title.x = element_blank(),
-    axis.text.x  = element_blank(),
-    axis.ticks.x = element_blank(),
-    axis.title.y = element_blank(),
-    axis.text.y  = element_text(angle = 45, hjust = 1),
-    axis.ticks.y = element_blank(),
-    legend.position = "none",
-    plot.title = element_text(hjust = 0.5)
-  )
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_blank(),
+        axis.text.y = element_text(angle = 45, hjust = 1),
+        axis.ticks.y = element_blank(),
+        legend.position = "none",
+        plot.title = element_text(hjust = 0.5))
 
-combined_plot_mid_res = g_mid_res + g0_mid_res + g_star_mid_res +
-  plot_layout(widths = c(6, 1, 1))
-
-
-## NONRESERVATION ONLY
-
-ci_nonres = boot_pmatrix_ci(
-  nonres, dad_mid, occ_mid,
-  R = 1000, conf = 0.95, .seed = 123
-) |>
-  mutate(
-    dad_mid = factor(dad_mid, levels = rev(mid_order)),
-    occ_mid = factor(occ_mid, levels = mid_order)
-  )
-
-g_mid_nonres = ggplot(ci_nonres, aes(x = occ_mid, y = dad_mid, fill = est)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
-            vjust = 0.3, size = 3) +
-  scale_fill_gradient(low = "white", high = "firebrick") +
-  labs(
-    x = "Son occupation",
-    y = "Father occupation",
-    fill = "Transition Prob.",
-    title = "P"
-  ) +
-  theme_minimal() +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    axis.text.y = element_text(angle = 45, hjust = 1),
-    axis.ticks = element_blank(),
-    axis.title = element_text(size = 10),
-    legend.position = "bottom",
-    plot.title = element_text(hjust = 0.5)
-  )
-
-pi0_vec_mid_nonres = pi_0(nonres, dad_mid)
-df_pi0_mid_nonres = tibble(
-  father = names(pi0_vec_mid_nonres),
-  pi0    = as.numeric(pi0_vec_mid_nonres)
-) |>
-  mutate(father = factor(father, levels = rev(mid_order)))
-
-g0_mid_nonres = ggplot(df_pi0_mid_nonres, aes(x = 1, y = father, fill = pi0)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi0)), size = 3) +
-  scale_fill_gradient(low = "white", high = "firebrick") +
-  labs(title = expression(pi[0])) +
-  theme_minimal() +
-  theme(
-    axis.title.x = element_blank(),
-    axis.text.x  = element_blank(),
-    axis.ticks.x = element_blank(),
-    axis.title.y = element_blank(),
-    axis.text.y  = element_text(angle = 45, hjust = 1),
-    axis.ticks.y = element_blank(),
-    legend.position = "none",
-    plot.title = element_text(hjust = 0.5)
-  )
-
-steady_mid_nonres = pi_star(p_matrix(nonres, dad_mid, occ_mid, TRUE))
-df_pi_star_mid_nonres = tibble(
-  father  = names(steady_mid_nonres),
-  pi_star = as.numeric(steady_mid_nonres)
-) |>
-  mutate(father = factor(father, levels = rev(mid_order)))
-
-g_star_mid_nonres = ggplot(df_pi_star_mid_nonres, aes(x = 1, y = father, fill = pi_star)) +
-  geom_tile(color = "white") +
-  geom_text(aes(label = sprintf("%.2f", pi_star)), size = 3) +
-  scale_fill_gradient(low = "white", high = "firebrick") +
-  labs(title = expression(pi^"*")) +
-  theme_minimal() +
-  theme(
-    axis.title.x = element_blank(),
-    axis.text.x  = element_blank(),
-    axis.ticks.x = element_blank(),
-    axis.title.y = element_blank(),
-    axis.text.y  = element_text(angle = 45, hjust = 1),
-    axis.ticks.y = element_blank(),
-    legend.position = "none",
-    plot.title = element_text(hjust = 0.5)
-  )
-
-combined_plot_mid_nonres = g_mid_nonres + g0_mid_nonres + g_star_mid_nonres +
-  plot_layout(widths = c(6, 1, 1))
-
+combined_plot_meso = g_meso + g0_meso + g_star_meso + plot_layout(widths = c(6, 1, 1))
 
 ################################################################################
 
-data = data |> mutate(res_cty_ok = ifelse(res_cty == 0 | statefip_1940 == 40, 0, 1))
-
 ## d(t), d'(t), AIM CURVES
 
-ts = 0:5
+ts = 0:4
 measures = tibble(
   measure = c("d", "d_prime", "AM"),
   fn = list(d_t, d_prime, am)
 )
 
-results_res = expand_grid(t = ts, measures) |>
+results_macro = expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(res, ..1, R = 1000,
-                                 level_dad = dad_mid,
-                                 level_son = occ_mid,
+                     ~ with_boot(data, ..1, R = 1000,
+                                 .seed = 123,
+                                 level_dad = macro_pop,
+                                 level_son = macro_son,
                                  t = ..2))) |>
   mutate(
     est   = map_dbl(boot, "estimate"),
@@ -817,11 +511,7 @@ results_res = expand_grid(t = ts, measures) |>
   select(measure, t, est, se, lo, hi) |>
   mutate(dt_t = est * t)
 
-write_csv(results_res, "data/advanced_measures_res.csv")
-
-results_res = read_csv("data/advanced_measures_res.csv")
-
-plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measure)) +
+plot_macro = ggplot(results_macro, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
   geom_line(linetype = 1) +
   geom_point(size = 1.5) +
@@ -833,7 +523,7 @@ plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measu
                     labels = c(d = expression(log(d(t))),
                                d_prime = expression(log(d*"'"*(t))),
                                AM = expression(log(AM(pi[0], t))))) +
-  scale_y_continuous(breaks = c(0, -2, -4, -6, -8, -10)) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
   labs(x = "Generation (t)", y = "log of Measure Value") +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
@@ -845,13 +535,14 @@ plot_res = ggplot(results_res, aes(x = t, y = est, color = measure, fill = measu
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
         axis.ticks = element_line(size = 0.5)) +
-  coord_cartesian(ylim = c(-10, 0))
+  coord_cartesian(ylim = c(-8, 0))
 
-results_nonres = expand_grid(t = ts, measures) |>
+results_meso = expand_grid(t = ts, measures) |>
   mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(nonres, ..1, R = 1000,
-                                 level_dad = dad_mid,
-                                 level_son = occ_mid,
+                     ~ with_boot(data, ..1, R = 1000,
+                                 .seed = 123,
+                                 level_dad = meso_pop,
+                                 level_son = meso_son,
                                  t = ..2))) |>
   mutate(
     est   = map_dbl(boot, "estimate"),
