@@ -54,18 +54,80 @@ desc_educd = data |>
 ############################### BASIC MEASURES #################################
 ################################################################################
 
+macro_levels = unique(data$macro_pop)
+meso_levels = unique(data$meso_pop)
+
 pi_0 = function(data, level) {
-  df = data |> 
-    group_by({{ level }}) |>
-    summarise(total_w = sum(w_atc_norm),
-              .groups = "drop") |>
-    mutate(pi0 = total_w / sum(total_w)) |>
-    arrange({{ level }})
+  level_sym = ensym(level)
+  level_nm  = as_string(level_sym)
+  
+  if (level_nm == "macro_pop") {
+    if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
+      all_levels <- get("macro_levels", envir = parent.frame())
+    } else {
+      all_levels <- unique(data[[level_nm]])
+      warning("macro_levels not found; falling back to unique(data$macro_pop)")
+    }
+  } else if (level_nm == "meso_pop") {
+    if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
+      all_levels <- get("meso_levels", envir = parent.frame())
+    } else {
+      all_levels <- unique(data[[level_nm]])
+      warning("meso_levels not found; falling back to unique(data$meso_pop)")
+    }
+  } else {
+    stop("`level` must be either `macro_pop` or `meso_pop`.")
+  }
+  
+  df = data |>
+    group_by(!!level_sym) |>
+    summarise(total_w = sum(w_atc_norm), .groups = "drop") |> 
+    complete(!!level_sym := all_levels, fill = list(total_w = 0)) |>
+    mutate(pi0 = total_w / sum(total_w)) %>%
+    arrange(factor(!!level_sym, levels = all_levels))
   
   pi0_vec = df$pi0
-  names(pi0_vec) = df |> pull({{ level }})
+  names(pi0_vec) = df[[level_nm]]
   return(pi0_vec)
 }
+
+pi_0_unweighted = function(data, level) {
+  level_sym = rlang::ensym(level)
+  level_nm  = rlang::as_string(level_sym)
+  
+  # Determine which set of canonical levels to use (macro or meso)
+  if (level_nm == "macro_pop") {
+    if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
+      all_levels <- get("macro_levels", envir = parent.frame())
+    } else {
+      all_levels <- unique(data[[level_nm]])
+      warning("macro_levels not found; falling back to unique(data$macro_pop)")
+    }
+  } else if (level_nm == "meso_pop") {
+    if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
+      all_levels <- get("meso_levels", envir = parent.frame())
+    } else {
+      all_levels <- unique(data[[level_nm]])
+      warning("meso_levels not found; falling back to unique(data$meso_pop)")
+    }
+  } else {
+    stop("`level` must be either `macro_pop` or `meso_pop`.")
+  }
+  
+  # Count occurrences per level
+  df = data |>
+    dplyr::group_by(!!level_sym) |>
+    dplyr::summarise(total_n = dplyr::n(), .groups = "drop") |>
+    tidyr::complete(!!level_sym := all_levels, fill = list(total_n = 0)) |>
+    dplyr::mutate(pi0 = total_n / sum(total_n)) |>
+    dplyr::arrange(factor(!!level_sym, levels = all_levels))
+  
+  # Convert to named vector
+  pi0_vec = df$pi0
+  names(pi0_vec) = df[[level_nm]]
+  return(pi0_vec)
+}
+
 
 p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
   dad_sym = ensym(level_dad)
@@ -74,16 +136,23 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
   dad_nm  = as_string(dad_sym)
   son_nm  = as_string(son_sym)
   
+  all_levels = union(unique(data[[dad_nm]]), unique(data[[son_nm]]))
+
+  complete_df = expand_grid(
+    !!dad_sym := all_levels,
+    !!son_sym := all_levels)
+  
   df = data |>
     group_by( !!dad_sym, !!son_sym ) |>
-    summarise(
-      n_w = sum(w_atc_norm),
-      .groups = "drop") |>
-    group_by( !!dad_sym ) |>
+    summarise(n_w = sum(w_atc_norm), .groups = "drop")
+  
+  df = right_join(complete_df, df, by = c(dad_nm, son_nm)) |>
+    mutate(n_w = ifelse(is.na(n_w), 0, n_w)) |>
+    group_by(!!dad_sym) |>
     mutate(
       n_i_w = sum(n_w),
-      P     = ifelse(n_i_w > 0, n_w / n_i_w, 0)) |>
-    ungroup()
+      P = ifelse(n_i_w > 0, n_w / n_i_w, 0)) |>
+    dplyr::ungroup()
   
   if (!matrix) return(df)
   
@@ -92,11 +161,80 @@ p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
     pivot_wider(
       names_from  = !!son_sym,
       values_from = P,
-      values_fill  = list(P = 0)
-    )
+      values_fill  = list(P = 0))
+  
+  missing_rows = setdiff(all_levels, wide[[dad_nm]])
+  if (length(missing_rows) > 0) {
+    extra = data.frame(matrix(0, nrow = length(missing_rows), ncol = ncol(wide)))
+    colnames(extra) = colnames(wide)
+    extra[[dad_nm]] = missing_rows
+    wide = rbind(wide, extra)
+  }
+  
+  wide = wide[match(all_levels, wide[[dad_nm]]), ]
   
   mat = as.matrix(wide |> select(-!!dad_sym))
   rownames(mat) = pull(wide, !!dad_sym)
+  
+  return(mat)
+}
+
+p_matrix_unweighted = function(data, level_dad, level_son, matrix = TRUE) {
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
+  
+  dad_nm  = rlang::as_string(dad_sym)
+  son_nm  = rlang::as_string(son_sym)
+  
+  # Get all unique levels from both dad and son
+  all_levels = union(unique(data[[dad_nm]]), unique(data[[son_nm]]))
+  
+  # Create all combinations (to ensure full square matrix)
+  complete_df = tidyr::expand_grid(
+    !!dad_sym := all_levels,
+    !!son_sym := all_levels
+  )
+  
+  # Count occurrences for each (dad, son) pair
+  df = data |>
+    dplyr::group_by(!!dad_sym, !!son_sym) |>
+    dplyr::summarise(n = dplyr::n(), .groups = "drop")
+  
+  # Add missing pairs (set count = 0)
+  df = dplyr::right_join(complete_df, df, by = c(dad_nm, son_nm)) |>
+    dplyr::mutate(n = ifelse(is.na(n), 0, n)) |>
+    dplyr::group_by(!!dad_sym) |>
+    dplyr::mutate(
+      n_total = sum(n),
+      P = ifelse(n_total > 0, n / n_total, 0)
+    ) |>
+    dplyr::ungroup()
+  
+  # Return tidy long form if requested
+  if (!matrix) return(df)
+  
+  # Pivot to wide matrix format
+  wide = df |>
+    dplyr::select(!!dad_sym, !!son_sym, P) |>
+    tidyr::pivot_wider(
+      names_from  = !!son_sym,
+      values_from = P,
+      values_fill = list(P = 0)
+    )
+  
+  # Add any missing rows (for dads that don’t appear)
+  missing_rows = setdiff(all_levels, wide[[dad_nm]])
+  if (length(missing_rows) > 0) {
+    extra = data.frame(matrix(0, nrow = length(missing_rows), ncol = ncol(wide)))
+    colnames(extra) = colnames(wide)
+    extra[[dad_nm]] = missing_rows
+    wide = rbind(wide, extra)
+  }
+  
+  # Order and convert to matrix
+  wide = wide[match(all_levels, wide[[dad_nm]]), ]
+  mat = as.matrix(wide |> dplyr::select(-!!dad_sym))
+  rownames(mat) = dplyr::pull(wide, !!dad_sym)
   
   return(mat)
 }
@@ -709,44 +847,58 @@ p_upward = function(data,
     pull(upward)
 }
 
-county_list = data |>
-  group_by(statefip_1940, countyicp_1940) |>
-  count() |>
-  filter(n >= 100)
-
 compute_mobility_stats = function(df) {
   
   p_upward = df |>
-    mutate(count = (macro_pop == "unemp" & macro_pop != "unemp") |
-             (macro_pop != "nonmanual" & macro_son == "nonmanual") |
-             (meso_pop == "farmworker" & meso_son == "farmer") |
-             (meso_pop == "unskilled" & meso_son == "crafts")) |>
-    summarise(tot = sum(w_atc_norm), up = sum(count)) |>
+    filter(macro_pop != "nonmanual") |>
+    mutate(count = macro_son == "nonmanual") |>
+    summarise(tot = sum(w_atc_norm / w_atc_norm), up = sum(count)) |>
     mutate(prop = up / tot) |>
     select(prop)
   
   p_downward = df |>
-    mutate(count = (macro_pop != "unemp" & macro_son == "unemp") |
-             (macro_pop == "nonmanual" & macro_son != "nonmanual") |
-             (meso_pop == "farmer" & meso_son == "farmworker") |
-             (meso_pop == "crafts" & meso_son == "unskilled")) |>
-    summarise(tot = sum(w_atc_norm), down = sum(count)) |>
+    filter(macro_pop == "nonmanual") |>
+    mutate(count = macro_son != "nonmanual") |>
+    summarise(tot = sum(w_atc_norm / w_atc_norm), down = sum(count)) |>
     mutate(prop = down / tot) |>
     select(prop)
   
-  #d1 = d_prime(df, macro_pop, macro_son, t = 1)
+  d1 = d_prime(df, macro_pop, macro_son, t = 1)
   
-  tibble(p_upward = p_upward$prop,
-         p_downward = p_downward$prop)
+  P = p_matrix(df, macro_pop, macro_son)
+  pi0 = pi_0(df, macro_pop)
+  
+  P_unweighted = p_matrix_unweighted(df, macro_pop, macro_son)
+  pi0_unweighted = pi_0_unweighted(df, macro_pop)
+  
+  om_weighted = om(P, pi0, t = 1)
+  om_unweighted = om(P_unweighted, pi0_unweighted, t = 1)
+  
+  tibble(p_upward = round(p_upward$prop, 2),
+         p_downward = round(p_downward$prop, 2),
+         d_prime_1 = round(exp(d1), 2),
+         om_1 = round(om_weighted, 2),
+         om_1_unweighted = round(om_unweighted, 2))
 }
 
-results = county_list |>
+results_county = data |>
+  group_by(statefip_1940, countyicp_1940) |>
+  count() |>
+  filter(n >= 90) |>
   mutate(stats = map2(statefip_1940, countyicp_1940, function(st, co) {
     df_sub = data |>
       filter(statefip_1940 == st, countyicp_1940 == co)
     compute_mobility_stats(df_sub)})) |>
   unnest(stats)
 
+results_region = data |>
+  group_by(region) |>
+  count() |>
+  mutate(stats = map(region, function(re) {
+    df_sub = data |>
+      filter(region == re)
+    compute_mobility_stats(df_sub)})) |>
+  unnest(stats)
 
 
 
