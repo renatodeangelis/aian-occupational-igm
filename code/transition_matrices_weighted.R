@@ -902,8 +902,5 @@ results_region = data |>
 
 
 
-
-
-
   
 
