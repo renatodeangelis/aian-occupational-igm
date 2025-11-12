@@ -776,18 +776,23 @@ im_boot_macro = boot_im_by_t(data, macro_pop, macro_son, ts = 0:4, R = 1000, .se
                                        nonmanual = "Nonmanual", unemp = "Not working"))
 
 im_macro_plot = ggplot(im_boot_macro, aes(x = t, y = est, color = origin)) +
-  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0) +
-  geom_line(linetype = 1) +
+#  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0) +
+  geom_line(linetype = 1, linewidth = 1) +
   geom_point(size = 1.5) +
   scale_x_continuous(breaks = 0:5) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  scale_color_manual(name = "Occ. Origin",
+                     values = c("Farming" = "forestgreen",
+                                "Manual" = "firebrick",
+                                "Nonmanual" = "steelblue",
+                                "Not working" = "darkorange")) +
   labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right","bottom"),
         legend.direction = "vertical",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 13),
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text = element_text(size = 12),
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
@@ -796,25 +801,35 @@ im_macro_plot = ggplot(im_boot_macro, aes(x = t, y = est, color = origin)) +
 
 # MESO
 im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed = 123) |>
-  dplyr::mutate(origin = dplyr::recode(origin,
-                                       farmer = "Farmer", unskilled = "Unskilled",
-                                       crafts = "Crafts", prof = "Professional",
-                                       clerical = "Clerical", unemp = "Not working",
-                                       farmworker = "Farmworker"))
+  mutate(origin = recode(origin, farmer = "Farmer", unskilled = "Unskilled",
+                         crafts = "Crafts", prof = "Professional",
+                         clerical = "Clerical", unemp = "Not working",
+                         farmworker = "Farmworker"),
+         origin = factor(origin, levels = c("Farmer", "Farmworker", "Crafts",
+                                            "Unskilled", "Professional",
+                                            "Clerical", "Not working")))
 
 im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
-  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0) +
-  geom_line(linetype = 1) +
+#  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0) +
+  geom_line(linetype = 1, linewidth = 1) +
   geom_point(size = 1.5) +
   scale_x_continuous(breaks = 0:5) +
   scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  scale_color_manual(name = "Occ. Origin",
+                     values = c("Farmer" = "darkgreen",
+                                "Farmworker" = "#90EE90",
+                                "Crafts" = "darkred",
+                                "Unskilled" = "pink",
+                                "Professional" = "darkblue",
+                                "Clerical" = "lightblue",
+                                "Not working" = "darkorange")) +
   labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
   theme_minimal() +
   theme(legend.position = c(0.5, 0.05),
         legend.justification = c("right","bottom"),
         legend.direction = "vertical",
-        legend.title = element_blank(),
-        legend.text = element_text(size = 13),
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text = element_text(size = 12),
         axis.line.x = element_line(linewidth = 0.5),
         axis.line.y = element_line(linewidth = 0.5),
         axis.text = element_text(size = 10),
@@ -823,6 +838,73 @@ im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
 
 im_combined = im_macro_plot + im_meso_plot + 
   plot_layout(widths = c(2, 2))
+
+# MIN AND MAX
+
+im_minmax_macro = im_boot_macro |>
+  group_by(t) |>
+  summarise(est_max = max(est),
+            lo_max = max(lo),
+            hi_max = max(hi),
+            est_min = min(est),
+            lo_min = min(lo),
+            hi_min = min(hi),
+            .groups = "drop") |>
+  pivot_longer(
+    cols = c(est_max, lo_max, hi_max, est_min, lo_min, hi_min),
+    names_to = c(".value", "type"),
+    names_pattern = "(.*)_(max|min)") |>
+  ggplot(aes(x = t, y = est, color = type, fill = type)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi, fill = type), alpha = 0.15, linetype = 0) +
+  geom_point(size = 1.5) +
+  geom_line(linetype = 1, linewidth = 1) +
+  scale_x_continuous(breaks = 0:5) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
+  theme_minimal() +
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right","bottom"),
+        legend.direction = "vertical",
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text = element_text(size = 12),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-8, 0))
+
+im_minmax_meso = im_boot_meso |>
+  group_by(t) |>
+  summarise(est_max = max(est),
+            lo_max = max(lo),
+            hi_max = max(hi),
+            est_min = min(est),
+            lo_min = min(lo),
+            hi_min = min(hi),
+            .groups = "drop") |>
+  pivot_longer(
+    cols = c(est_max, lo_max, hi_max, est_min, lo_min, hi_min),
+    names_to = c(".value", "type"),
+    names_pattern = "(.*)_(max|min)") |>
+  ggplot(aes(x = t, y = est, color = type, fill = type)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi, fill = type), alpha = 0.15, linetype = 0) +
+  geom_point(size = 1.5) +
+  geom_line(linetype = 1, linewidth = 1) +
+  scale_x_continuous(breaks = 0:5) +
+  scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
+  labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
+  theme_minimal() +
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right","bottom"),
+        legend.direction = "vertical",
+        legend.title = element_text(size = 13, face = "bold"),
+        legend.text = element_text(size = 12),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5)) +
+  coord_cartesian(ylim = c(-8, 0))
+
 
 ## OVERALL MOBILITY
 
@@ -909,20 +991,34 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
                   group = interaction(level, measure)),
               alpha = 0.2, color = NA) +
   geom_line(aes(color = level, linetype = measure,
-                group = interaction(level, measure)), linewidth = 0.8) +
-  geom_point(aes(shape = measure, color = level), size = 2) +
+                group = interaction(level, measure)), linewidth = 1) +
+  geom_point(aes(shape = measure, color = level), size = 2.5) +
   scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6)) +
   scale_y_continuous(breaks = c(0.3, 0.4, 0.5, 0.6, 0.7)) +
-  scale_linetype_manual(values = c("OM" = "solid", "EM" = "dashed")) +
-  scale_shape_manual(values = c("OM" = 16, "EM" = 17)) +
-  scale_color_manual(values = c("macro" = "darkgreen", "meso" = "steelblue")) +
-  scale_fill_manual(values = c("macro" = "darkgreen", "meso" = "steelblue")) +
+  scale_linetype_manual(name = "Measure",
+                        labels = c("Exchange Mobility", "Overall Mobility"),
+                        values = c("OM" = "solid", "EM" = "dashed")) +
+  scale_shape_manual(name = "Measure",
+                     labels = c("Exchange Mobility", "Overall Mobility"),
+                     values = c("OM" = 16, "EM" = 17)) +
+  scale_color_manual(name = "Level",
+                     labels = c("Macro", "Meso"),
+                     values = c("macro" = "darkgreen", "meso" = "steelblue")) +
+  scale_fill_manual(name = "Level",
+                    labels = c("Macro", "Meso"),
+                    values = c("macro" = "darkgreen", "meso" = "steelblue")) +
   labs(y = "Probability to move") +
   theme_minimal() +
-  theme(legend.position = c(0.5, 0.05),
+  theme(legend.position = c(1, 0.05),
         legend.justification = c("right","bottom"),
-        legend.direction = "vertical",
-        legend.title = element_blank()) +
+        legend.direction = "horizontal",
+        legend.text = element_text(size = 12),
+        legend.title = element_text(size = 13, face = "bold")) +
+  guides(
+    color = guide_legend(title.position = "top", direction = "horizontal"),
+    fill = guide_legend(title.position = "top", direction = "horizontal"),
+    shape = guide_legend(title.position = "top", direction = "horizontal"),
+    linetype = guide_legend(title.position = "top", direction = "horizontal")) +
   coord_cartesian(xlim = c(1, 6),
                   ylim = c(0.3, 0.7)); om_plot
   
