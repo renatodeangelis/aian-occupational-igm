@@ -63,16 +63,16 @@ pi_0 = function(data, level) {
   
   if (level_nm == "macro_pop") {
     if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels <- get("macro_levels", envir = parent.frame())
+      all_levels = get("macro_levels", envir = parent.frame())
     } else {
-      all_levels <- unique(data[[level_nm]])
+      all_levels = unique(data[[level_nm]])
       warning("macro_levels not found; falling back to unique(data$macro_pop)")
     }
   } else if (level_nm == "meso_pop") {
     if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels <- get("meso_levels", envir = parent.frame())
+      all_levels = get("meso_levels", envir = parent.frame())
     } else {
-      all_levels <- unique(data[[level_nm]])
+      all_levels = unique(data[[level_nm]])
       warning("meso_levels not found; falling back to unique(data$meso_pop)")
     }
   } else {
@@ -98,16 +98,16 @@ pi_0_unweighted = function(data, level) {
   # Determine which set of canonical levels to use (macro or meso)
   if (level_nm == "macro_pop") {
     if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels <- get("macro_levels", envir = parent.frame())
+      all_levels = get("macro_levels", envir = parent.frame())
     } else {
-      all_levels <- unique(data[[level_nm]])
+      all_levels = unique(data[[level_nm]])
       warning("macro_levels not found; falling back to unique(data$macro_pop)")
     }
   } else if (level_nm == "meso_pop") {
     if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels <- get("meso_levels", envir = parent.frame())
+      all_levels = get("meso_levels", envir = parent.frame())
     } else {
-      all_levels <- unique(data[[level_nm]])
+      all_levels = unique(data[[level_nm]])
       warning("meso_levels not found; falling back to unique(data$meso_pop)")
     }
   } else {
@@ -823,6 +823,109 @@ im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
 
 im_combined = im_macro_plot + im_meso_plot + 
   plot_layout(widths = c(2, 2))
+
+## OVERALL MOBILITY
+
+mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
+                                     R = 1000, .seed = NULL, conf = 0.95) {
+  if (!is.null(.seed)) set.seed(.seed)
+  alpha = 1 - conf
+  
+  P = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+  pi0 = pi_0(data, {{ level_dad }})
+  pi0_num = as.numeric(pi0)
+  
+  compute_series_from_P = function(Pmat, pi0_vec, ts_vec) {
+    pi0_num_local = as.numeric(pi0_vec)
+    map_dfr(ts_vec, function(tt) {
+      OMv = om(Pmat, pi0_num_local, tt)
+      SMv = sm(Pmat, pi0_num_local, tt)
+      EMv = OMv - SMv
+      tibble(t = tt, OM = OMv, SM = SMv, EM = EMv)
+    })
+  }
+  
+  point_series = compute_series_from_P(P, pi0_num, ts)
+  
+  N = nrow(data)
+  inds_mat = matrix(sample.int(N, N * R, replace = TRUE), nrow = N, ncol = R)
+  
+  worker_draw = function(j) {
+    idx = inds_mat[, j]
+    dsub = data[idx, , drop = FALSE]
+    
+    P_b = p_matrix(dsub, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
+    pi0_b = pi_0(dsub, {{ level_dad }})
+    
+    if (!is.null(names(pi0_b)) && !is.null(rownames(P_b)) && !all(names(pi0_b) == rownames(P_b))) {
+      if (all(names(pi0_b) %in% rownames(P_b))) {
+        pi0_b = pi0_b[rownames(P_b)]
+      } else {
+        pi0_b = as.numeric(pi0_b)
+      }
+    }
+    
+    out = compute_series_from_P(P_b, pi0_b, ts)
+    as.matrix(out |> select(OM, SM, EM))
+  }
+  
+  boots_list = lapply(seq_len(R), worker_draw)
+  
+  boots_array = simplify2array(boots_list)  # dims: (rows = length(ts)) x (cols = 3) x R
+  
+  nT = length(ts)
+  measures = c("OM", "SM", "EM")
+  
+  summarised = map_dfr(seq_len(nT), function(i_t) {
+    draws_mat = boots_array[i_t, , , drop = FALSE]
+    draws_mat = matrix(draws_mat, nrow = 3, ncol = R)
+    
+    map_dfr(seq_len(3), function(m_idx) {
+      v = draws_mat[m_idx, ]
+      tibble(
+        t = ts[i_t],
+        measure = measures[m_idx],
+        est = point_series %>% filter(t == ts[i_t]) %>% pull(measures[m_idx]),
+        se = sd(v, na.rm = TRUE),
+        lo = quantile(v, probs = alpha/2, na.rm = TRUE, names = FALSE),
+        hi = quantile(v, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
+      )
+    })
+  })
+  
+  summarised
+}
+
+macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 1:6)
+meso_om = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 1:6)
+
+om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
+  mutate(level = factor(level, labels = c("meso", "macro"))) |>
+  filter(measure != "SM") |>
+  filter(t != 0)
+
+om_plot = ggplot(om_total, aes(x = t, y = est)) +
+  geom_ribbon(aes(ymin = lo, ymax = hi, fill = level,
+                  group = interaction(level, measure)),
+              alpha = 0.2, color = NA) +
+  geom_line(aes(color = level, linetype = measure,
+                group = interaction(level, measure)), linewidth = 0.8) +
+  geom_point(aes(shape = measure, color = level), size = 2) +
+  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6)) +
+  scale_y_continuous(breaks = c(0.3, 0.4, 0.5, 0.6, 0.7)) +
+  scale_linetype_manual(values = c("OM" = "solid", "EM" = "dashed")) +
+  scale_shape_manual(values = c("OM" = 16, "EM" = 17)) +
+  scale_color_manual(values = c("macro" = "darkgreen", "meso" = "steelblue")) +
+  scale_fill_manual(values = c("macro" = "darkgreen", "meso" = "steelblue")) +
+  labs(y = "Probability to move") +
+  theme_minimal() +
+  theme(legend.position = c(0.5, 0.05),
+        legend.justification = c("right","bottom"),
+        legend.direction = "vertical",
+        legend.title = element_blank()) +
+  coord_cartesian(xlim = c(1, 6),
+                  ylim = c(0.3, 0.7)); om_plot
+  
 
 ## COUNTY ESTIMATION
 
