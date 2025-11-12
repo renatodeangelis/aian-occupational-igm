@@ -10,6 +10,7 @@ library(purrr)
 library(tigris)
 library(jtools)
 library(maps)
+library(paletteer)
 
 data = read_csv("data/aian_weighted.csv")
 
@@ -1063,13 +1064,71 @@ compute_mobility_stats = function(df) {
 results_region = data |>
   group_by(region) |>
   count() |>
-  mutate(stats = map(region, function(re) {
+  mutate(stats = purrr::map(region, function(re) {
     df_sub = data |>
       filter(region == re)
     compute_mobility_stats(df_sub)})) |>
   unnest(stats)
 
+state_regions = tibble(
+  state_name = tolower(c(
+    "alabama","arizona","arkansas","california","colorado","connecticut","delaware",
+    "florida","georgia","idaho","illinois","indiana","iowa","kansas","kentucky",
+    "louisiana","maine","maryland","massachusetts","michigan","minnesota",
+    "mississippi","missouri","montana","nebraska","nevada","new hampshire",
+    "new jersey","new mexico","new york","north carolina","north dakota","ohio",
+    "oklahoma","oregon","pennsylvania","rhode island","south carolina","south dakota",
+    "tennessee","texas","utah","vermont","virginia","washington","west virginia","wisconsin","wyoming")),
+  statefip_1940 = c(
+    1,4,5,6,8,9,10,
+    12,13,16,17,18,19,20,21,
+    22,23,24,25,26,27,28,29,
+    30,31,32,33,34,35,36,37,
+    38,39,40,41,42,44,45,46,
+    47,48,49,50,51,53,54,55,56),
+  region = case_when(
+    statefip_1940 %in% c(8, 16, 32, 49, 56)  ~ "basin",
+    statefip_1940 == 6                         ~ "cali",
+    statefip_1940 %in% c(27, 55)               ~ "lakes",
+    statefip_1940 %in% c(17, 18, 26, 39)       ~ "midwest",
+    statefip_1940 == 37                        ~ "nc",
+    statefip_1940 %in% c(9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "ne",
+    statefip_1940 %in% c(30, 38, 46)           ~ "plains",
+    statefip_1940 %in% c(41, 53)               ~ "nw",
+    statefip_1940 == 40                        ~ "ok",
+    statefip_1940 %in% c(19, 20, 29, 31)       ~ "prairie",
+    statefip_1940 %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54) ~ "south",
+    statefip_1940 %in% c(4, 35)                ~ "sw",
+    TRUE ~ NA_character_))
 
+states_sf = st_as_sf(map("state", plot = FALSE, fill = TRUE)) |>
+  rename(state_name = ID) |>
+  left_join(state_regions, by = "state_name") |>
+  st_make_valid() |>
+  left_join(results_region, by = "region")
 
-  
+sf::sf_use_s2(FALSE)
+
+regions_sf = states_sf |>
+  filter(!is.na(region)) |>
+  group_by(region) |>
+  summarize(geom = st_union(geom), .groups = "drop")
+
+centroids = st_centroid(regions_sf) |>
+  left_join(results_region, by = "region")
+
+om_1_plot = ggplot() +
+  geom_sf(data = states_sf, aes(fill = om_1_unweighted), color = "white", size = 0) +
+  geom_sf(data = regions_sf, fill = NA, color = "black", size = 0.8) +
+  geom_sf_text(data = centroids, aes(label = om_1_unweighted),
+               size = 4, color = "black", fontface = "bold") +
+  scale_fill_gradient(low = "lightyellow", high = "firebrick") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 15, face = "bold")) +
+  labs(title = "OM(1) by Region")
 
