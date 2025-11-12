@@ -10,7 +10,7 @@ library(purrr)
 library(tigris)
 library(jtools)
 library(maps)
-library(paletteer)
+library(sf)
 
 data = read_csv("data/aian_weighted.csv")
 
@@ -385,13 +385,6 @@ sm = function(P, pi0, t) {
   mu_t = mu_t(pi0, P, t)
   mu_t1 = as.numeric(mu_t %*% P)
   return(tv_norm(mu_t, mu_t1))
-}
-
-em = function(P, pi0, t) {
-  OM = om(P, pi0, t)
-  SM = sm(P, pi0, t)
-  
-  return(OM - SM)
 }
 
 ## ---- helpers to find generators of d(t) and d'(t) ----------------------------
@@ -1131,4 +1124,34 @@ om_1_plot = ggplot() +
         panel.grid = element_blank(),
         plot.title = element_text(size = 15, face = "bold")) +
   labs(title = "OM(1) by Region")
+
+d_1_prime_plot = ggplot() +
+  geom_sf(data = states_sf, aes(fill = d_prime_1), color = "white", size = 0) +
+  geom_sf(data = regions_sf, fill = NA, color = "black", size = 0.8) +
+  geom_sf_text(data = centroids, aes(label = d_prime_1),
+               size = 4, color = "black", fontface = "bold") +
+  scale_fill_gradient(low = "lightyellow", high = "firebrick") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 15, face = "bold")) +
+  labs(title = "d'(1) by Region")
+
+upward_downward_plot = ggplot() +
+  geom_sf(data = states_sf, aes(fill = round(p_upward/p_downward, 2)), color = "white", size = 0) +
+  geom_sf(data = regions_sf, fill = NA, color = "black", size = 0.8) +
+  geom_sf_text(data = centroids, aes(label = round(p_upward/p_downward, 2)),
+               size = 4, color = "black", fontface = "bold") +
+  scale_fill_gradient(low = "lightyellow", high = "firebrick") +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.title = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 15, face = "bold")) +
+  labs(title = "P(upward) / P(downward) by Region")
 
