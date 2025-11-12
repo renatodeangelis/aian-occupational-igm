@@ -9,6 +9,7 @@ library(rlang)
 library(purrr)
 library(tigris)
 library(jtools)
+library(maps)
 
 data = read_csv("data/aian_weighted.csv")
 
@@ -1025,27 +1026,6 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
 
 ## COUNTY ESTIMATION
 
-p_upward = function(data,
-                    level = c("macro", "meso"),
-                    farming = TRUE,
-                    unemp = FALSE,
-                    w_atc_norm = w_atc_norm) {
-  
-  level = match.arg(level)
-  
-  data |>
-    mutate(upward =
-             (unemp & macro_pop == "unemp" & macro_son != "unemp") |
-             (farming & macro_pop == "farming" & macro_son == "white_col") |
-             if (level == "macro")
-               (macro_pop == "blue_col" & macro_son == "white_col")
-           else 
-             (dad_meso == "unskilled" & (macro_son == "white_col" | occ_meso == "crafts")) |
-             (dad_meso == "clerical" & occ_meso == "prof")) |>
-    summarise(upward = w_atc_normed.mean(as.numeric(upward), w = {{ w_atc_norm }})) |>
-    pull(upward)
-}
-
 compute_mobility_stats = function(df) {
   
   p_upward = df |>
@@ -1079,16 +1059,6 @@ compute_mobility_stats = function(df) {
          om_1 = round(om_weighted, 2),
          om_1_unweighted = round(om_unweighted, 2))
 }
-
-results_county = data |>
-  group_by(statefip_1940, countyicp_1940) |>
-  count() |>
-  filter(n >= 90) |>
-  mutate(stats = map2(statefip_1940, countyicp_1940, function(st, co) {
-    df_sub = data |>
-      filter(statefip_1940 == st, countyicp_1940 == co)
-    compute_mobility_stats(df_sub)})) |>
-  unnest(stats)
 
 results_region = data |>
   group_by(region) |>
