@@ -973,12 +973,12 @@ mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
   summarised
 }
 
-macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 1:6)
-meso_om = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 1:6)
+macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 0:6)
+meso_om = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 0:6)
 
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
   mutate(level = factor(level, labels = c("meso", "macro"))) |>
-  filter(measure != "SM") |>
+  filter(measure != "SM") #|>
   filter(t != 0)
 
 om_plot = ggplot(om_total, aes(x = t, y = est)) +
@@ -988,8 +988,8 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
   geom_line(aes(color = level, linetype = measure,
                 group = interaction(level, measure)), linewidth = 1) +
   geom_point(aes(shape = measure, color = level), size = 2.5) +
-  scale_x_continuous(breaks = c(1, 2, 3, 4, 5, 6)) +
-  scale_y_continuous(breaks = c(0.3, 0.4, 0.5, 0.6, 0.7)) +
+  scale_x_continuous(breaks = c(0, 1, 2, 3, 4, 5, 6)) +
+  scale_y_continuous(breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)) +
   scale_linetype_manual(name = "Measure",
                         labels = c("Exchange Mobility", "Overall Mobility"),
                         values = c("OM" = "solid", "EM" = "dashed")) +
@@ -997,10 +997,10 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
                      labels = c("Exchange Mobility", "Overall Mobility"),
                      values = c("OM" = 16, "EM" = 17)) +
   scale_color_manual(name = "Level",
-                     labels = c("Macro", "Meso"),
+                     labels = c("Meso", "Macro"),
                      values = c("macro" = "darkgreen", "meso" = "steelblue")) +
   scale_fill_manual(name = "Level",
-                    labels = c("Macro", "Meso"),
+                    labels = c("Meso", "Macro"),
                     values = c("macro" = "darkgreen", "meso" = "steelblue")) +
   labs(y = "Probability to move") +
   theme_minimal() +
@@ -1014,10 +1014,9 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
     fill = guide_legend(title.position = "top", direction = "horizontal"),
     shape = guide_legend(title.position = "top", direction = "horizontal"),
     linetype = guide_legend(title.position = "top", direction = "horizontal")) +
-  coord_cartesian(xlim = c(1, 6),
-                  ylim = c(0.3, 0.7)); om_plot
+  coord_cartesian(xlim = c(0, 6),
+                  ylim = c(0, 0.7)); om_plot
   
-
 ## COUNTY ESTIMATION
 
 compute_mobility_stats = function(df) {
@@ -1047,8 +1046,8 @@ compute_mobility_stats = function(df) {
   P_unweighted = p_matrix_unweighted(df, macro_pop, macro_son)
   pi0_unweighted = pi_0_unweighted(df, macro_pop)
   
-  om_weighted = om(P, pi0, t = 1)
-  om_unweighted = om(P_unweighted, pi0_unweighted, t = 1)
+  om_weighted = om(P, pi0, t = 0)
+  om_unweighted = om(P_unweighted, pi0_unweighted, t = 0)
   
   tibble(p_upward = round(p_upward$prop, 2),
          p_downward = round(p_downward$prop, 2),
@@ -1126,7 +1125,7 @@ om_1_plot = ggplot() +
         axis.ticks = element_blank(),
         panel.grid = element_blank(),
         plot.title = element_text(size = 15, face = "bold")) +
-  labs(title = "OM(1) by Region")
+  labs(title = "OM(0) by Region")
 
 d_1_prime_plot = ggplot() +
   geom_sf(data = states_sf, aes(fill = d_prime_1), color = "white", size = 0) +
