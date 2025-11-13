@@ -1024,14 +1024,17 @@ compute_mobility_stats = function(df) {
   
   p_upward = df |>
     filter(macro_pop != "nonmanual") |>
-    mutate(count = macro_son == "nonmanual") |>
+    mutate(count = macro_son == "nonmanual" |
+             macro_pop == "unemp" & macro_son != "unemp") |>
     summarise(tot = sum(w_atc_norm / w_atc_norm), up = sum(count)) |>
     mutate(prop = up / tot) |>
     select(prop)
   
   p_downward = df |>
-    filter(macro_pop == "nonmanual") |>
-    mutate(count = macro_son != "nonmanual") |>
+    filter(macro_pop == "nonmanual" | meso_pop == "farmer" | meso_pop == "crafts") |>
+    mutate(count = (macro_pop == "nonmanual" & macro_son != "nonmanual") |
+             (meso_pop == "farmer" & meso_son %in% c("unskilled", "farmworker", "unemp")) |
+             (meso_pop == "crafts" & meso_son %in% c("unskilled", "farmworker", "unemp"))) |>
     summarise(tot = sum(w_atc_norm / w_atc_norm), down = sum(count)) |>
     mutate(prop = down / tot) |>
     select(prop)
