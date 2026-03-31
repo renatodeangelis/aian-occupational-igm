@@ -11,8 +11,11 @@ library(tigris)
 library(jtools)
 library(maps)
 library(sf)
+library(weights)
 
-data = read_csv("data/aian_weighted.csv")
+data = read_csv("data/aian_weighted.csv") |>
+  mutate(meso_pop = if_else(meso_pop %in% c("prof", "clerical"), "white_collar", meso_pop),
+         meso_son = if_else(meso_son %in% c("prof", "clerical"), "white_collar", meso_son))
 
 ## DATA DESCRIPTION
 
@@ -130,55 +133,30 @@ pi_0_unweighted = function(data, level) {
   return(pi0_vec)
 }
 
-
 p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
-  dad_sym = ensym(level_dad)
-  son_sym = ensym(level_son)
-  
-  dad_nm  = as_string(dad_sym)
-  son_nm  = as_string(son_sym)
-  
-  all_levels = union(unique(data[[dad_nm]]), unique(data[[son_nm]]))
+  dad_nm = as_string(ensym(level_dad))
+  son_nm = as_string(ensym(level_son))
 
-  complete_df = expand_grid(
-    !!dad_sym := all_levels,
-    !!son_sym := all_levels)
-  
-  df = data |>
-    group_by( !!dad_sym, !!son_sym ) |>
-    summarise(n_w = sum(w_atc_norm), .groups = "drop")
-  
-  df = right_join(complete_df, df, by = c(dad_nm, son_nm)) |>
-    mutate(n_w = ifelse(is.na(n_w), 0, n_w)) |>
-    group_by(!!dad_sym) |>
-    mutate(
-      n_i_w = sum(n_w),
-      P = ifelse(n_i_w > 0, n_w / n_i_w, 0)) |>
-    dplyr::ungroup()
-  
-  if (!matrix) return(df)
-  
-  wide = df |>
-    select( !!dad_sym, !!son_sym, P ) |>
-    pivot_wider(
-      names_from  = !!son_sym,
-      values_from = P,
-      values_fill  = list(P = 0))
-  
-  missing_rows = setdiff(all_levels, wide[[dad_nm]])
-  if (length(missing_rows) > 0) {
-    extra = data.frame(matrix(0, nrow = length(missing_rows), ncol = ncol(wide)))
-    colnames(extra) = colnames(wide)
-    extra[[dad_nm]] = missing_rows
-    wide = rbind(wide, extra)
+  all_levels = sort(union(unique(data[[dad_nm]]), unique(data[[son_nm]])))
+  dad_f = factor(data[[dad_nm]], levels = all_levels)
+  son_f = factor(data[[son_nm]], levels = all_levels)
+
+  tab = xtabs(data$w_atc_norm ~ dad_f + son_f)
+  rs  = rowSums(tab)
+  P   = sweep(tab, 1, ifelse(rs > 0, rs, 1), "/")
+
+  mat = base::matrix(as.numeric(P), nrow(P), ncol(P),
+                     dimnames = list(all_levels, all_levels))
+
+  if (!matrix) {
+    return(
+      expand.grid(setNames(list(all_levels, all_levels), c(dad_nm, son_nm)),
+                  stringsAsFactors = FALSE) |>
+        dplyr::mutate(P = as.vector(t(mat)))
+    )
   }
-  
-  wide = wide[match(all_levels, wide[[dad_nm]]), ]
-  
-  mat = as.matrix(wide |> select(-!!dad_sym))
-  rownames(mat) = pull(wide, !!dad_sym)
-  
-  return(mat)
+
+  mat
 }
 
 p_matrix_unweighted = function(data, level_dad, level_son, matrix = TRUE) {
@@ -189,7 +167,7 @@ p_matrix_unweighted = function(data, level_dad, level_son, matrix = TRUE) {
   son_nm  = rlang::as_string(son_sym)
   
   # Get all unique levels from both dad and son
-  all_levels = union(unique(data[[dad_nm]]), unique(data[[son_nm]]))
+  all_levels = sort(union(unique(data[[dad_nm]]), unique(data[[son_nm]])))
   
   # Create all combinations (to ensure full square matrix)
   complete_df = tidyr::expand_grid(
@@ -247,31 +225,77 @@ pi_star = function(p_mat) {
   idx = which.min(abs(eig$values - 1))
   v = Re(eig$vectors[, idx])
   if (any(v < 0)) v = abs(v)
-  pi_star = v / sum(v)
-  names(pi_star) = rownames(P)
-  return(pi_star)
+  pi_s = v / sum(v)
+  names(pi_s) = rownames(P)
+  return(pi_s)
 }
 
 ################################################################################
 ############################## ADVANCED MEASURES ###############################
 ################################################################################
 
-with_boot = function(data, stat_fn, R = 1000, .seed = NULL, ...) {
+## boot_measures_by_t: single bootstrap loop for d(t), d'(t), and AM(t) curves.
+## One resample → one p_matrix call → all (measure × t) computed from that P.
+## This replaces the old with_boot approach which ran 15 independent loops
+## (3 measures × 5 t-values), each recomputing p_matrix from scratch.
+boot_measures_by_t = function(data, level_dad, level_son,
+                               ts = 0:4, R = 1000, .seed = NULL) {
   if (!is.null(.seed)) set.seed(.seed)
-  args_q = rlang::enquos(...)
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
+
+  # --- helper: evaluate all three measures at all t from a given P / pi0 / pi* ---
+  # Uses incremental matrix multiplication (Pt = Pt %*% P each step) so P^t is
+  # never recomputed from scratch. Requires ts to be sorted non-decreasing from 0.
+  compute_all = function(P, pi0, pi_s) {
+    Pt = diag(nrow(P))                    # start at P^0 = I
+    purrr::map_dfr(ts, function(tt) {
+      if (tt > 0) Pt <<- Pt %*% P         # advance one generation
+      pi_t   = as.numeric(pi0 %*% Pt)
+      n      = nrow(Pt)
+      pairs  = combn(n, 2)
+      tibble::tibble(
+        t       = tt,
+        d       = log(max(apply(Pt, 1, function(r) tv_norm(r, pi_s)))),
+        d_prime = log(max(apply(pairs, 2, function(i) tv_norm(Pt[i[1],], Pt[i[2],])))),
+        AM      = log(tv_norm(pi_t, pi_s))
+      )
+    })
+  }
+
+  # --- point estimates on the full data ---
+  P_hat   = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
+  pi0_hat = as.numeric(pi_0(data, !!dad_sym))
+  piS_hat = pi_star(P_hat)
+  point_df = compute_all(P_hat, pi0_hat, piS_hat)   # [length(ts) × 4]
+
+  # --- bootstrap: one set of resamples, one p_matrix per draw ---
   N = nrow(data)
-  stat_call = function(d) rlang::eval_tidy(rlang::call2(stat_fn, data = d, !!!args_q))
-  
-  est = stat_call(data)
-  
   boots = replicate(R, {
-    d_b = data[sample.int(N, N, replace = TRUE), , drop = FALSE]
-    stat_call(d_b)
-  }, simplify = TRUE)  # for these stats, boots is a numeric vector (scalar per draw)
-  
-  se = sd(boots, na.rm = TRUE)
-  
-  list(estimate = est, se = se, draws = boots)
+    idx   = sample.int(N, N, replace = TRUE)
+    P_b   = p_matrix(data[idx, ], !!dad_sym, !!son_sym, matrix = TRUE)
+    pi0_b = as.numeric(pi_0(data[idx, ], !!dad_sym))
+    piS_b = pi_star(P_b)
+    as.matrix(compute_all(P_b, pi0_b, piS_b)[, c("d", "d_prime", "AM")])
+  }, simplify = FALSE)
+
+  arr = simplify2array(boots)   # [nT × 3 × R]
+
+  # --- summarise: point estimate + SE + 95% percentile CI per (measure, t) ---
+  measure_nms = c("d", "d_prime", "AM")
+  purrr::map_dfr(seq_along(ts), function(i_t) {
+    purrr::map_dfr(seq_along(measure_nms), function(m_idx) {
+      v = arr[i_t, m_idx, ]
+      tibble::tibble(
+        measure = measure_nms[m_idx],
+        t       = ts[i_t],
+        est     = point_df[[measure_nms[m_idx]]][i_t],
+        se      = sd(v, na.rm = TRUE),
+        lo      = quantile(v, 0.025, na.rm = TRUE, names = FALSE),
+        hi      = quantile(v, 0.975, na.rm = TRUE, names = FALSE)
+      )
+    })
+  }) |> dplyr::mutate(dt_t = est * t)
 }
 
 boot_pmatrix_ci = function(
@@ -318,12 +342,12 @@ tv_norm = function(mu, nu){
 
 d_t = function(data, level_dad, level_son, t = 1){
   P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_star = pi_star(P_mat)
-  
+  pi_s  = pi_star(P_mat)
+
   P_t = P_mat %^% t
-  
-  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_star))
-  
+
+  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
+
   log(max(d_i))
 }
 
@@ -344,27 +368,23 @@ d_prime = function(data, level_dad, level_son, t = 1){
 }
 
 am = function(data, level_dad, level_son, t = 1){
-  pi_0 = pi_0(data, {{ level_dad }})
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_star = pi_star(P_mat)
-  
-  P_t = P_mat %^% t
-  
-  pi_t = as.numeric(pi_0 %*% P_t)
-  
-  am = tv_norm(pi_t, pi_star)
-  
-  log(am)
+  pi_init = pi_0(data, {{ level_dad }})
+  P_mat   = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_s    = pi_star(P_mat)
+
+  P_t  = P_mat %^% t
+  pi_t = as.numeric(pi_init %*% P_t)
+
+  log(tv_norm(pi_t, pi_s))
 }
 
 im = function(data, level_dad, level_son, t = 1){
   P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_star = pi_star(P_mat)
-  
-  P_t = P_mat %^% t
-  
-  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_star))
-  
+  pi_s  = pi_star(P_mat)
+
+  P_t  = P_mat %^% t
+  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
+
   log(im_i)
 }
 
@@ -375,16 +395,14 @@ mu_t = function(pi0, P, t = 0) {
 }
 
 om = function(P, pi0, t) {
-  P = as.matrix(P)
-  mu_t = mu_t(pi0, P, t)
-  return(1 - sum(mu_t * diag(P)))
+  mu = mu_t(pi0, P, t)
+  1 - sum(mu * diag(P))
 }
 
 sm = function(P, pi0, t) {
-  P = as.matrix(P)
-  mu_t = mu_t(pi0, P, t)
-  mu_t1 = as.numeric(mu_t %*% P)
-  return(tv_norm(mu_t, mu_t1))
+  mu  = mu_t(pi0, P, t)
+  mu1 = as.numeric(mu %*% P)
+  tv_norm(mu, mu1)
 }
 
 ## ---- helpers to find generators of d(t) and d'(t) ----------------------------
@@ -520,14 +538,12 @@ p_mat_meso = boot_pmatrix_ci(
 
 g_meso = ggplot(
   p_mat_meso |> 
-    mutate(meso_pop = factor(meso_pop, levels = c("unem", "prof",
-                                                  "clerical", "crafts",
-                                                  "unskilled", "farmer",
-                                                  "farmworker")),
-           meso_son = factor(meso_son, levels = rev(c("unemp", "prof",
-                                                      "clerical", "crafts",
-                                                      "unskilled", "farmer",
-                                                  "farmworker")))),
+    mutate(meso_pop = factor(meso_pop, levels = c("unemp", "white_collar",
+                                                  "crafts", "unskilled",
+                                                  "farmer", "farmworker")),
+           meso_son = factor(meso_son, levels = rev(c("unemp", "white_collar",
+                                                      "crafts", "unskilled",
+                                                      "farmer", "farmworker")))),
   aes(x = meso_son, y = meso_pop, fill = est)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
@@ -552,10 +568,9 @@ df_pi0_meso = tibble(
   pi0 = as.numeric(pi0_vec_meso)) |>
   mutate(father = factor(father, levels = rev(unique(father))))
 g0_meso = ggplot(df_pi0_meso |>
-                   mutate(father = factor(father, levels = c("unemp", "prof",
-                                                                 "clerical", "crafts",
-                                                                 "unskilled", "farmer",
-                                                                 "farmworker"))),
+                   mutate(father = factor(father, levels = c("unemp", "white_collar",
+                                                                 "crafts", "unskilled",
+                                                                 "farmer", "farmworker"))),
                           aes(x = 1, y = father, fill = pi0)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", pi0)),
@@ -578,10 +593,9 @@ df_pi_star_meso = tibble(
   pi_star = as.numeric(steady_meso)) |>
   mutate(father = factor(father, levels = rev(unique(father))))
 g_star_meso = ggplot(df_pi_star_meso |>
-                       mutate(father = factor(father, levels = c("unemp", "prof",
-                                                                     "clerical", "crafts",
-                                                                     "unskilled", "farmer",
-                                                                     "farmworker"))),
+                       mutate(father = factor(father, levels = c("unemp", "white_collar",
+                                                                     "crafts", "unskilled",
+                                                                     "farmer", "farmworker"))),
                      aes(x = 1, y = father, fill = pi_star)) +
   geom_tile(color = "white") +
   geom_text(aes(label = sprintf("%.2f", pi_star)),
@@ -605,24 +619,8 @@ combined_plot_meso = g_meso + g0_meso + g_star_meso + plot_layout(widths = c(6, 
 ## d(t), d'(t), AM CURVES
 
 ts = 0:4
-measures = tibble(
-  measure = c("d", "d_prime", "AM"),
-  fn = list(d_t, d_prime, am))
 
-results_macro = expand_grid(t = ts, measures) |>
-  mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(data, ..1, R = 1000,
-                                 .seed = 123,
-                                 level_dad = macro_pop,
-                                 level_son = macro_son,
-                                 t = ..2))) |>
-  mutate(
-    est   = map_dbl(boot, "estimate"),
-    se    = map_dbl(boot, "se"),
-    lo    = map_dbl(boot, ~ quantile(.x$draws, 0.025, na.rm = TRUE)),
-    hi    = map_dbl(boot, ~ quantile(.x$draws, 0.975, na.rm = TRUE))) |>
-  select(measure, t, est, se, lo, hi) |>
-  mutate(dt_t = est * t)
+results_macro = boot_measures_by_t(data, macro_pop, macro_son, ts = ts, R = 1000, .seed = 123)
 
 measure_plot_macro = ggplot(results_macro, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
@@ -650,20 +648,7 @@ measure_plot_macro = ggplot(results_macro, aes(x = t, y = est, color = measure, 
         axis.ticks = element_line(size = 0.5)) +
   coord_cartesian(ylim = c(-8, 0))
 
-results_meso = expand_grid(t = ts, measures) |>
-  mutate(boot = pmap(list(fn, t),
-                     ~ with_boot(data, ..1, R = 1000,
-                                 .seed = 123,
-                                 level_dad = meso_pop,
-                                 level_son = meso_son,
-                                 t = ..2))) |>
-  mutate(
-    est   = map_dbl(boot, "estimate"),
-    se    = map_dbl(boot, "se"),
-    lo    = map_dbl(boot, ~ quantile(.x$draws, 0.025, na.rm = TRUE)),
-    hi    = map_dbl(boot, ~ quantile(.x$draws, 0.975, na.rm = TRUE))) |>
-  select(measure, t, est, se, lo, hi) |>
-  mutate(dt_t = est * t)
+results_meso = boot_measures_by_t(data, meso_pop, meso_son, ts = ts, R = 1000, .seed = 123)
 
 measure_plot_meso = ggplot(results_meso, aes(x = t, y = est, color = measure, fill = measure)) +
   geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
@@ -706,9 +691,10 @@ boot_im_by_t = function(data, level_dad, level_son, ts = 0:4, R = 1000, .seed = 
   piS0 = pi_star(P0)
   rowlabs = rownames(P0)
   
+  Pt0 = diag(nrow(P0))
   point_by_t = purrr::map(ts, function(tt) {
-    Pt = if (tt == 0) diag(nrow(P0)) else P0 %^% tt
-    im_vals = apply(Pt, 1, function(r) tv_norm(r, piS0))
+    if (tt > 0) Pt0 <<- Pt0 %*% P0
+    im_vals = apply(Pt0, 1, function(r) tv_norm(r, piS0))
     tibble::tibble(t = tt, origin = rowlabs, est = log(im_vals))
   }) |> dplyr::bind_rows()
   
@@ -720,23 +706,10 @@ boot_im_by_t = function(data, level_dad, level_son, ts = 0:4, R = 1000, .seed = 
     P   = p_matrix(db, !!dad_sym, !!son_sym, matrix = TRUE)
     piS = pi_star(P)
     
-    # for efficiency, walk powers iteratively
     Pt = diag(nrow(P))
     out_list = vector("list", length(ts))
     for (k in seq_along(ts)) {
-      tt = ts[k]
-      if (tt > 0) {
-        # incrementally multiply from previous Pt (safer than P%^%tt in a loop)
-        if (k == 1) {  # if first t > 0
-          Pt = P %^% tt
-        } else {
-          # if ts is strictly increasing by 1, you can do Pt = Pt %*% P
-          # but to be robust to arbitrary ts, recompute only when needed:
-          Pt = P %^% tt
-        }
-      } else {
-        Pt = diag(nrow(P))
-      }
+      if (ts[k] > 0) Pt = Pt %*% P
       im_vals = apply(Pt, 1, function(r) tv_norm(r, piS))
       out_list[[k]] = log(im_vals)
     }
@@ -797,12 +770,11 @@ im_macro_plot = ggplot(im_boot_macro, aes(x = t, y = est, color = origin)) +
 # MESO
 im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed = 123) |>
   mutate(origin = recode(origin, farmer = "Farmer", unskilled = "Unskilled",
-                         crafts = "Crafts", prof = "Professional",
-                         clerical = "Clerical", unemp = "Not working",
-                         farmworker = "Farmworker"),
+                         crafts = "Crafts", white_collar = "White Collar",
+                         unemp = "Not working", farmworker = "Farmworker"),
          origin = factor(origin, levels = c("Farmer", "Farmworker", "Crafts",
-                                            "Unskilled", "Professional",
-                                            "Clerical", "Not working")))
+                                            "Unskilled", "White Collar",
+                                            "Not working")))
 
 im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
 #  geom_ribbon(aes(ymin = lo, ymax = hi, fill = origin), alpha = 0.15, linetype = 0) +
@@ -815,8 +787,7 @@ im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
                                 "Farmworker" = "#90EE90",
                                 "Crafts" = "darkred",
                                 "Unskilled" = "pink",
-                                "Professional" = "darkblue",
-                                "Clerical" = "lightblue",
+                                "White Collar" = "darkblue",
                                 "Not working" = "darkorange")) +
   labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
   theme_minimal() +
@@ -913,12 +884,13 @@ mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
   pi0_num = as.numeric(pi0)
   
   compute_series_from_P = function(Pmat, pi0_vec, ts_vec) {
-    pi0_num_local = as.numeric(pi0_vec)
+    mu = as.numeric(pi0_vec)
     map_dfr(ts_vec, function(tt) {
-      OMv = om(Pmat, pi0_num_local, tt)
-      SMv = sm(Pmat, pi0_num_local, tt)
-      EMv = OMv - SMv
-      tibble(t = tt, OM = OMv, SM = SMv, EM = EMv)
+      if (tt > 0) mu <<- as.numeric(mu %*% Pmat)
+      mu1 = as.numeric(mu %*% Pmat)
+      OMv = 1 - sum(mu * diag(Pmat))
+      SMv = tv_norm(mu, mu1)
+      tibble(t = tt, OM = OMv, SM = SMv, EM = OMv - SMv)
     })
   }
   
@@ -952,20 +924,20 @@ mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
   
   nT = length(ts)
   measures = c("OM", "SM", "EM")
-  
+  est_mat = as.matrix(point_series[, measures])   # [nT × 3], pre-indexed
+
   summarised = map_dfr(seq_len(nT), function(i_t) {
-    draws_mat = boots_array[i_t, , , drop = FALSE]
-    draws_mat = matrix(draws_mat, nrow = 3, ncol = R)
-    
+    draws_mat = matrix(boots_array[i_t, , ], nrow = 3, ncol = R)
+
     map_dfr(seq_len(3), function(m_idx) {
       v = draws_mat[m_idx, ]
       tibble(
-        t = ts[i_t],
+        t       = ts[i_t],
         measure = measures[m_idx],
-        est = point_series %>% filter(t == ts[i_t]) %>% pull(measures[m_idx]),
-        se = sd(v, na.rm = TRUE),
-        lo = quantile(v, probs = alpha/2, na.rm = TRUE, names = FALSE),
-        hi = quantile(v, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
+        est     = est_mat[i_t, m_idx],
+        se      = sd(v, na.rm = TRUE),
+        lo      = quantile(v, probs = alpha/2,     na.rm = TRUE, names = FALSE),
+        hi      = quantile(v, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
       )
     })
   })
@@ -978,8 +950,7 @@ meso_om = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 0:6)
 
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
   mutate(level = factor(level, labels = c("meso", "macro"))) |>
-  filter(measure != "SM") #|>
-  filter(t != 0)
+  filter(measure != "SM")
 
 om_plot = ggplot(om_total, aes(x = t, y = est)) +
   geom_ribbon(aes(ymin = lo, ymax = hi, fill = level,
@@ -1023,9 +994,9 @@ compute_mobility_stats = function(df) {
   
   p_upward = df |>
     filter(macro_pop != "nonmanual") |>
-    mutate(count = macro_son == "nonmanual" |
-             macro_pop == "unemp" & macro_son != "unemp") |>
-    summarise(tot = sum(w_atc_norm / w_atc_norm), up = sum(count)) |>
+    mutate(count = (macro_son == "nonmanual") |
+             (macro_pop == "unemp" & macro_son != "unemp")) |>
+    summarise(tot = sum(w_atc_norm), up = sum(count * w_atc_norm)) |>
     mutate(prop = up / tot) |>
     select(prop)
   
@@ -1034,7 +1005,7 @@ compute_mobility_stats = function(df) {
     mutate(count = (macro_pop == "nonmanual" & macro_son != "nonmanual") |
              (meso_pop == "farmer" & meso_son %in% c("unskilled", "farmworker", "unemp")) |
              (meso_pop == "crafts" & meso_son %in% c("unskilled", "farmworker", "unemp"))) |>
-    summarise(tot = sum(w_atc_norm / w_atc_norm), down = sum(count)) |>
+    summarise(tot = sum(w_atc_norm), down = sum(count * w_atc_norm)) |>
     mutate(prop = down / tot) |>
     select(prop)
   

@@ -20,7 +20,7 @@ aian_raw = read_csv(
                    histid_pop_1860 = col_character(),
                    histid_pop_1870 = col_character(),
                    histid_pop_1880 = col_character(),
-                   histid_pop_1900 = col_character(),
+                     histid_pop_1900 = col_character(),
                    histid_pop_1910 = col_character(),
                    histid_pop_1920 = col_character(),
                    histid_pop_1930 = col_character(),
@@ -118,7 +118,7 @@ modal_occ_pick = aian_clean |>
 
 classify_meso = function(occ, split_farmer = TRUE) {
   farmer_codes = c(100, 123)
-  prof_codes = c(0:99, 200:290)
+  prof_codes = c(1:99, 200:290)
   crafts_codes = c(762, 773, 781, 782)
   
   case_when(

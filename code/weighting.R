@@ -53,7 +53,7 @@ classify_macro = function(meso) {
 aian_full = read_csv(
   file = "https://www.dropbox.com/scl/fi/imhz0zujc9dfhx3dc6kox/usa_00021.csv?rlkey=1b5xq14od1cky4iyvfbrob413&st=ndwbat7q&dl=1") |>
   janitor::clean_names() |>
-  filter(age < 45,
+  filter(age >= 20 & age < 45,
          school == 1) |>
   mutate(linked = 0,
          birthyr_son = 1940 - age,
@@ -86,13 +86,11 @@ aian_full = read_csv(
 
 aian_comb = bind_rows(aian_merged, aian_full) |>
   mutate(
-    meso_son = as.factor(meso_son),
-    meso_son_alt = as.factor(meso_son_alt),
     region = as.factor(region),
     education = as.factor(education),
     birthyr_son = as.factor(birthyr_son))
 
-ps_model = glm(linked ~ birthyr_son + meso_son + region + education,
+ps_model = glm(linked ~ birthyr_son + region + education,
             data = aian_comb,
             family = binomial)
 
