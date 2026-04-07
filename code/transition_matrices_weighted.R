@@ -13,6 +13,8 @@ library(maps)
 library(sf)
 library(weights)
 
+source("code/utils.R")
+
 data = read_csv("data/aian_weighted.csv") |>
   mutate(meso_pop = if_else(meso_pop %in% c("prof", "clerical"), "white_collar", meso_pop),
          meso_son = if_else(meso_son %in% c("prof", "clerical"), "white_collar", meso_son))
@@ -1052,20 +1054,7 @@ state_regions = tibble(
     30,31,32,33,34,35,36,37,
     38,39,40,41,42,44,45,46,
     47,48,49,50,51,53,54,55,56),
-  region = case_when(
-    statefip_1940 %in% c(8, 16, 32, 49, 56)  ~ "basin",
-    statefip_1940 == 6                         ~ "cali",
-    statefip_1940 %in% c(27, 55)               ~ "lakes",
-    statefip_1940 %in% c(17, 18, 26, 39)       ~ "midwest",
-    statefip_1940 == 37                        ~ "nc",
-    statefip_1940 %in% c(9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "ne",
-    statefip_1940 %in% c(30, 38, 46)           ~ "plains",
-    statefip_1940 %in% c(41, 53)               ~ "nw",
-    statefip_1940 == 40                        ~ "ok",
-    statefip_1940 %in% c(19, 20, 29, 31)       ~ "prairie",
-    statefip_1940 %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54) ~ "south",
-    statefip_1940 %in% c(4, 35)                ~ "sw",
-    TRUE ~ NA_character_))
+  region = assign_region(statefip_1940))
 
 states_sf = st_as_sf(map("state", plot = FALSE, fill = TRUE)) |>
   rename(state_name = ID) |>

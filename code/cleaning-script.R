@@ -4,6 +4,8 @@ library(stringr)
 library(tidyr)
 library(tibble)
 
+source("code/utils.R")
+
 aian_raw = read_csv(
   file = "https://www.dropbox.com/scl/fi/3gwg0wvb0sj0njjdjxg1p/clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv?rlkey=qvub7x5cy6zsbgp74a90l381q&st=kdbmvn65&dl=1",
   col_types = cols(.default = col_integer(),
@@ -51,7 +53,7 @@ aian_clean = aian_raw |>
                    .names = "{.col}"),
             .groups = "drop") |>
   mutate(across(20:56, ~ na_if(.x, "")),
-         across(25:56, as.integer)) |>
+         across(25:56, ~ as.integer(sub(";.*", "", .x)))) |>
   filter(! if_any(starts_with("histid_pop_"), 
                   ~ grepl(";", .x, fixed = TRUE))) |>
   mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
@@ -78,7 +80,7 @@ modal_occ_pick = aian_clean |>
   left_join(aian_age |> select(pid, birth_median), by = "pid") |>
   rename(birthyr_pop = birth_median) |>
   select(-starts_with("age")) |>
-  filter(birthyr_son > birthyr_pop + 15) |>
+  filter(birthyr_son > birthyr_pop + 20) |>
   select(pid, starts_with("occ1950_pop_"), birthyr_pop) |>
   pivot_longer(
     cols = starts_with("occ1950_pop_"),
@@ -107,7 +109,7 @@ modal_occ_pick = aian_clean |>
   filter(freq == max(freq)) |>
   mutate(age_dist = dplyr::coalesce(abs(implied_age - 40), Inf)) |>
   arrange(pid, age_dist, year) |>
-  filter(dplyr::coalesce(implied_age, Inf) <= 65) |>
+  filter(is.na(implied_age) | implied_age <= 65) |>
   slice_head(n = 1) |>
   ungroup() |>
   transmute(pid,
@@ -115,34 +117,6 @@ modal_occ_pick = aian_clean |>
             picked_year = year,
             age_at_pick = implied_age,
             birthyr_pop)
-
-classify_meso = function(occ, split_farmer = TRUE) {
-  farmer_codes = c(100, 123)
-  prof_codes = c(1:99, 200:290)
-  crafts_codes = c(762, 773, 781, 782)
-  
-  case_when(
-    occ %in% farmer_codes ~ "farmer",
-    split_farmer & occ %in% 810:840 ~ "farmworker",
-    occ %in% prof_codes ~ "prof",
-    occ %in% 300:490 ~ "clerical",
-    occ %in% 500:594 | occ %in% crafts_codes ~ "crafts",
-    occ %in% 595:970 & !(occ %in% crafts_codes) & !(split_farmer & occ %in% 810:840) ~ "unskilled",
-    occ > 970 ~ "unemp"
-  )
-}
-
-classify_macro = function(meso) {
-  case_when(
-    meso %in% c("farmer", "farmworker") ~ "farming",
-    meso %in% c("prof", "clerical") ~ "nonmanual",
-    meso %in% c("crafts", "unskilled") ~ "manual",
-    meso == "unemp" ~ "unemp")
-}
-
-macro_order = c("farming", "manual", "nonmanual", "unemp")
-meso_order = c("farmworker", "farmer", "unskilled", "crafts", "clerical", "prof", "unemp")
-meso_order_alt = c("farmer", "unskilled", "crafts", "clerical", "prof", "unemp")
 
 aian_merged = aian_clean |>
   left_join(modal_occ_pick, by = c("pid")) |>

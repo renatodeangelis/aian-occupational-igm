@@ -7,22 +7,7 @@ proposed fixes where they exist. Organized by script/stage of the pipeline.
 
 ## 1. Cleaning (`cleaning-script.R`)
 
-### 1.1 Minimum father–son age gap is too loose (line 81)
-
-```r
-filter(birthyr_son > birthyr_pop + 15)
-```
-
-A 15-year minimum allows fathers who were 16 at the birth of their son. The IGM
-literature standard is 25–30 years. At short gaps, the "father" may be an older
-brother or other male relative misidentified in the linking — a particular concern for
-AIAN households, which were often multi-generational and enumerated inconsistently.
-
-**Fix**: Test sensitivity at 20- and 25-year minimums and report whether estimates change.
-
----
-
-### 1.2 Father birth year is averaged, but the spread is computed and never used (lines 68–73)
+### 1.1 Father birth year is averaged, but the spread is computed and never used (lines 68–73)
 
 ```r
 summarise(across(starts_with("birthyr"), ~ mean(.x, na.rm = TRUE)))
@@ -40,7 +25,7 @@ pairs with `spread > 5`.
 
 ---
 
-### 1.3 Multi-valued numeric fields are silently coerced to NA (lines 50–54)
+### 1.2 Multi-valued numeric fields are silently coerced to NA (lines 50–54)
 
 ```r
 across(24:55, ~ paste(unique(na.omit(.x)), collapse = "; "))
@@ -58,171 +43,62 @@ dropped entirely rather than handled explicitly.
 ```r
 across(25:56, ~ as.integer(sub(";.*", "", .x)))
 ```
-
----
-
-### 1.4 Occupation code 0 (NIU) is classified as "prof" (line 121)
-
-```r
-prof_codes = c(0:99, 200:290)
-```
-
-In the occ1950 scheme, code 0 is "not in universe" — assigned to people outside the
-labour force. These are misclassified as professional workers. This affects sons whose
-1940 occupation was not recorded and any fathers with `occ = 0`.
-
-**Fix**:
-
-```r
-prof_codes = c(1:99, 200:290)
-```
-
----
-
-### 1.5 "unemp" conflates unemployment, non-employment, and missing (line 131)
-
-```r
-occ > 970 ~ "unemp"
-```
-
-occ1950 codes 971–999 include: housewife, student, retired/unable to work, inmate,
-and 999 (occupation not reported). These are categorically different from unemployed
-and seeking work. Treating them as equivalent inflates the "unemp" category and
-distorts the transition matrix for men who are simply not in the labour force.
-
-**Fix**: Rename the category to `"nilf"` (not in labour force) and describe its
-composition in the data section. Consider splitting 999 (missing) from 971–998
-(explicit non-participation) and reporting how many observations fall in each.
-
----
-
-### 1.6 "prof" collapses professionals with managers and proprietors (line 121)
-
-`prof_codes = c(1:99, 200:290)` (after fix 1.4) groups occ1950's
-"professional/technical" (physicians, lawyers, engineers: 1–99) with "managers,
-officials, and proprietors" (200–290). These groups differ substantially in education
-requirements, intergenerational transmission, and relevance to AIAN economic
-history. Small traders and local proprietors (200–290) are not comparable to
-licensed professionals.
-
-Now partially mitigated by the `white_collar` collapse at the meso level, but the
-macro-level "nonmanual" category still combines them.
-
-**Fix**: Justify in the paper, or split into "prof" (1–99) and "manager" (200–290)
-and test whether their transition profiles differ.
-
----
-
-### 1.7 Crafts codes extracted from 595–970 are undocumented (line 122)
-
-```r
-crafts_codes = c(762, 773, 781, 782)
-```
-
-Four specific construction trades (painters, plasterers, plumbers, structural metal
-workers) are rescued from the "unskilled" range into "crafts." The reason only these
-four codes need this treatment — and not other potentially skilled trades in 595–970 —
-is unexplained. The selection is arbitrary-seeming without documentation.
-
-**Fix**: Document the source of these codes and check whether other skilled trades in
-595–970 (e.g., bricklayers, electricians if miscoded) should also be included.
-
----
-
-### 1.8 `classify_meso` and `classify_macro` are duplicated (lines 119–141 and `weighting.R:29–51`)
-
-Identical functions appear in both `cleaning-script.R` and `weighting.R`. These have
-already silently diverged: `classify_macro` in `weighting.R` still maps
-`c("prof", "clerical") ~ "nonmanual"` while `transition_matrices_weighted.R` has
-collapsed these into `white_collar` as a post-load mutation. Any future change to the
-classification must be made in two places, and the two scripts can silently produce
-inconsistent results.
-
-**Fix**: Move both functions to a shared `utils.R` and `source()` it from both scripts.
-
----
-
-### 1.9 Father age filter at 65 excludes fathers with no estimable birth year (line 110)
-
-```r
-filter(dplyr::coalesce(implied_age, Inf) <= 65)
-```
-
-`coalesce(NA, Inf)` sets missing implied age to Inf, so fathers whose birth year
-cannot be estimated are excluded from the modal occupation selection entirely. This is
-an implicit restriction that is not acknowledged. These fathers may be systematically
-different (e.g., linked through a single census appearance with no age recorded).
-
-**Fix**: Document explicitly. Consider whether fathers with no estimable birth year
-should be retained with occupation drawn from whatever census years are available,
-rather than dropped.
-
 ---
 
 ## 2. Weighting (`weighting.R`)
 
-### 2.1 Missing lower age bound in the full AIAN comparison sample (line 56)
+### 2.3 Birth year specification is overly flexible
+
+Birth year is entered as a factor with up to 25 levels (born 1896–1920). This eats
+degrees of freedom and doesn't exploit the fact that adjacent birth years likely have
+similar linkage propensities. The factor specification is unusual in the census-linking
+literature and probably overfitting.
+
+| Specification | Pros | Cons |
+|---|---|---|
+| 5-year cohort bins | Smooth, parsimonious, interpretable | Arbitrary bin edges |
+| Quadratic polynomial | 2 df, captures nonlinear age effects | Misses sharp changes |
+| Natural spline (`ns(birthyr, df=4)`) | Flexible, smooth, few df | Harder to interpret |
+| Factor (current) | Maximally flexible | 24 df, overfits in small regions |
+
+**Fix**: Use 5-year cohort bins (standard in Abramitzky, Boustan, & Eriksson; Bailey
+et al.) or a natural spline with 3–4 df:
 
 ```r
-filter(age < 45, school == 1)
-```
-
-The unlinked AIAN census extract has no lower age bound. If `school == 1` means
-"not attending school" (standard IPUMS 1940 coding), children aged 4+ who are not
-enrolled satisfy this filter. These would be classified as "prof" (via the occ=0 bug
-above) and included in the PS estimation as controls, severely distorting the model.
-
-**Fix**:
-
-```r
-filter(between(age, 20, 44), school == 1)
+aian_comb = aian_comb |>
+  mutate(cohort = cut(as.numeric(as.character(birthyr_son)),
+                      breaks = c(1895, 1900, 1905, 1910, 1915, 1921),
+                      labels = c("1896-1900","1901-1905","1906-1910",
+                                 "1911-1915","1916-1920")))
 ```
 
 ---
 
-### 2.2 PS model does not include region × covariate interactions (line 95)
+### 2.4 Missing covariates that predict linkage
 
-```r
-ps_model = glm(linked ~ birthyr_son + meso_son + region + education,
-               data = aian_comb, family = binomial)
-```
+Several variables available in the 1940 IPUMS census are absent from the PS model but
+plausibly predict linkage success, especially for AIAN populations:
 
-The model includes region as a main effect, assuming the relationship between linkage
-and (birth year, education, occupation) is the same in all regions. This is unlikely —
-BIA record-keeping practices, reservation settlement patterns, and name stability
-varied substantially by region, meaning education and birth year predict linkage
-differently in the South vs. the Basin states.
+| Variable | IPUMS name | Why it predicts linkage |
+|---|---|---|
+| Urbanization | `urban` / `metro` | Urban AIAN men more mobile, harder to link |
+| Literacy | `lit` | Literate men have more consistent records |
+| Household size | `famsize` / `nchild` | Larger households harder to disambiguate |
+| Marital status | `marst` | Married men more residentially stable |
+| Employment status | `empstat` | Employed men have recorded occupations |
+| Birthplace | `bpl` | Reservation-born may link differently |
 
-**Fix**: Add region interactions:
+Literacy and urbanization are highest-value: they directly relate to AIAN-specific
+mechanisms of linkage failure (reservation vs. urban enumeration, record quality).
+`lit_son` is already in `aian_merged` but not in the PS model.
 
-```r
-ps_model = glm(
-  linked ~ birthyr_son * region + meso_son * region + education * region,
-  data   = aian_comb,
-  family = binomial
-)
-```
-
-This is equivalent to region-stratified models but shares data across regions for
-stability, avoiding separation problems in small regions. Everything downstream
-(`p_hat`, ATC weights, normalization) is unchanged.
+**Fix**: Add urbanization and literacy at minimum. Any variable added to the PS model
+must also be available in the comparison sample (`aian_full` from `usa_00021.csv`).
+If the extract doesn't include these fields, a new IPUMS extract is needed.
 
 ---
 
-### 2.3 `meso_son` (an outcome) is a PS covariate (line 95)
-
-The son's occupation is both a covariate in the PS model and the outcome of the
-mobility process being studied. This creates circularity: the weights depend on where
-the son ended up, which means the weighted transition probabilities are not purely
-driven by father-side selection into the linked sample.
-
-**Fix**: Re-estimate without `meso_son` and test whether national and regional
-estimates change materially. If they do not, the simpler model is preferable. If they
-do, discuss the tradeoff explicitly in the paper.
-
----
-
-### 2.4 No weight trimming or diagnostics (lines 101–105)
+### 2.5 No weight trimming or diagnostics (lines 101–105)
 
 Observations with very low `p_hat` receive very large ATC weights. No trimming,
 stabilization, or diagnostic output is produced. A small number of extreme weights
@@ -246,7 +122,65 @@ Report both trimmed and untrimmed estimates and note where they diverge.
 
 ---
 
-### 2.5 Bootstrap does not account for weight estimation uncertainty
+### 2.6 No covariate balance diagnostics
+
+Weights are estimated but never checked for whether they achieve balance. Standard
+practice is to report standardized mean differences (SMDs) for each covariate, weighted
+and unweighted. If any SMD exceeds 0.1 after weighting, the PS model is inadequate.
+
+**Fix**:
+
+```r
+library(cobalt)
+bal.tab(linked ~ cohort * region + education * region + statefip_1940,
+        data = aian_comb, weights = "w_atc_norm",
+        method = "weighting", estimand = "ATC")
+```
+
+**Reporting state balance**: A 48-row state balance table is unwieldy for the paper.
+Report balance on the substantive covariates (cohort, education, region, literacy,
+urbanization) in the main balance table. State is a nuisance variable — it improves
+prediction but the paper makes no state-level claims. For state, report a one-line
+summary in the text or appendix:
+
+```r
+state_smds = bt$Balance |>
+  filter(grepl("statefip", rownames(bt$Balance))) |>
+  pull(Diff.Adj)
+
+cat("State balance — max |SMD|:", max(abs(state_smds)),
+    " mean |SMD|:", mean(abs(state_smds)), "\n")
+```
+
+e.g., "After weighting, the maximum SMD across state indicators is 0.XX." If any
+individual state exceeds 0.1–0.2, investigate (likely a state with very few linked
+observations receiving extreme weights).
+
+This is non-negotiable for publication — reviewers cannot assess whether the weights
+are doing their job without it.
+
+---
+
+### 2.7 No common support check
+
+Observations with very high or very low propensity scores may fall outside the region
+of common support between the linked and unlinked samples. These observations receive
+extreme weights and contribute disproportionately to estimates.
+
+**Fix**: Plot PS distributions and trim:
+
+```r
+ggplot(aian_comb, aes(x = p_hat, fill = factor(linked))) +
+  geom_density(alpha = 0.5) +
+  labs(x = "Propensity score", fill = "Linked")
+```
+
+Trim observations outside the overlap region, or at minimum report the proportion
+of observations that fall outside common support.
+
+---
+
+### 2.8 Bootstrap does not account for weight estimation uncertainty
 
 **This is the most consequential methodological issue in the paper.**
 
@@ -268,14 +202,13 @@ compute_weights = function(df_linked, df_full) {
     df_full   |> mutate(linked = 0)
   ) |>
     mutate(
-      meso_son   = as.factor(meso_son),
       region     = as.factor(region),
       education  = as.factor(education),
       birthyr_son = as.factor(birthyr_son)
     )
 
   model = glm(
-    linked ~ birthyr_son * region + meso_son * region + education * region,
+    linked ~ birthyr_son * region + education * region,
     data   = df_comb,
     family = binomial
   )
@@ -349,12 +282,21 @@ results_region = data |>
 
 ---
 
-### 3.2 Regional maps show no sample size or uncertainty
+### 3.2 Regional OM map uses unweighted estimates (line 1087)
+
+`om_1_plot` maps `om_1_unweighted` rather than the weighted `om_1`. All other national
+estimates in the paper use ATC-weighted statistics. If this is intentional (e.g., because
+regional weight renormalization is unresolved per 3.1), it should be noted in the paper.
+If not, it is a bug — change `om_1_unweighted` to `om_1` on lines 1087 and 1089.
+
+---
+
+### 3.3 Regional maps show no sample size or uncertainty
 
 `om_1_plot`, `d_1_prime_plot`, and `upward_downward_plot` present point estimates for
-all 13 regions with equal visual weight. Several regions (Northeast, Great Lakes,
-Midwest) likely have very few linked AIAN pairs — perhaps fewer than 50 — making the
-4×4 transition matrix unreliable.
+all 12 regions with equal visual weight. Several regions (ne, lakes, midwest) likely
+have very few linked AIAN pairs — perhaps fewer than 50 — making the 4x4 transition
+matrix unreliable.
 
 **Fix**: Compute effective sample size (ESS) per region and either grey out regions
 below a threshold or overlay the raw n:
@@ -374,7 +316,7 @@ estimates for regions with ESS < 30 (or whatever threshold is defensible).
 
 ---
 
-### 3.3 The upward/downward mobility ratio is not well defined
+### 3.4 The upward/downward mobility ratio is not well defined
 
 `p_upward` and `p_downward` are computed over different sub-populations of fathers,
 so their denominators are not comparable. The ratio `p_upward / p_downward` cannot be
@@ -395,38 +337,25 @@ clean interpretation and is directly comparable across regions.
 
 ## 4. Modeling Assumptions
 
-### 4.1 First-order Markov assumption is not tested
-
-The entire analysis rests on P(son's class | father's class) being independent of
-grandfather's class. For AIAN families with strong dynastic persistence (or strong
-dynastic disruption from allotment/assimilation policy), this may not hold. The
-linked data may contain grandfather occupations for a subset of pairs (via earlier
-census linkages), which would allow a direct test.
-
-**Suggestion**: For the subsample with grandfather information, test whether adding
-grandfather's class to the transition model materially changes coefficient estimates.
-
----
-
-### 4.2 Stationarity across cohorts is assumed but not tested
+### 4.1 Stationarity across cohorts is assumed but not tested
 
 Sons aged 20–44 in 1940 were born 1896–1920. WWI, the 1920s labour market, and the
 early Depression all fall within this window and plausibly affected AIAN occupational
 mobility differently across cohorts. The current P matrix pools all cohorts.
 
-**Fix**: Split by birth cohort (e.g., ≤1905 / 1906–1915 / ≥1916) and compare
+**Fix**: Split by birth cohort (e.g., <=1905 / 1906–1915 / >=1916) and compare
 transition matrices. Report whether convergence measures differ materially.
 
 ---
 
-### 4.3 Ergodicity is assumed but not verified
+### 4.2 Ergodicity is assumed but not verified
 
 `pi_star` computes the stationary distribution via eigendecomposition and takes the
 eigenvector associated with the eigenvalue closest to 1. If the chain is not ergodic
 (e.g., a zero row in P for a sparse regional matrix), there may be multiple unit
-eigenvalues and the returned π* is arbitrary.
+eigenvalues and the returned pi* is arbitrary.
 
-**Fix**: After computing P in any context where π* is used, verify there is exactly
+**Fix**: After computing P in any context where pi* is used, verify there is exactly
 one unit eigenvalue:
 
 ```r
@@ -440,51 +369,16 @@ verify_ergodic = function(P) {
 
 ---
 
-### 4.4 t=0 on the overall mobility plot is ambiguous
+### 4.3 t=0 on the overall mobility plot is ambiguous
 
-`om(P, pi0, t=0)` = 1 − Σᵢ π₀ᵢ Pᵢᵢ is a function of both the diagonal of P and the
-initial distribution. It is not a "baseline mobility" in any natural sense — it just
+`om(P, pi0, t=0)` = 1 - sum_i pi0_i P_ii is a function of both the diagonal of P and
+the initial distribution. It is not a "baseline mobility" in any natural sense — it just
 says how many men in the observed initial distribution are in classes with low
 persistence. Including it on the OM/EM curve implies a pre-generational baseline that
-the data do not support: only t=1 is directly observed; t≥2 are extrapolations under
+the data do not support: only t=1 is directly observed; t>=2 are extrapolations under
 stationarity.
 
-**Fix**: Either drop t=0 from the plot, or mark t=1 as "observed" and t≥2 as
+**Fix**: Either drop t=0 from the plot, or mark t=1 as "observed" and t>=2 as
 "projected under stationarity."
 
 ---
-
-## 5. Gender and Scope
-
-The analysis is restricted to men throughout. This is standard in the IGM literature
-(due to low and selective female labour force participation in the early 20th century),
-but for AIAN communities the gender dynamics of occupational inheritance may differ
-substantially from white or Black patterns. The paper's claims about AIAN
-intergenerational mobility are claims about male mobility specifically, and this
-boundary condition should be stated explicitly in the introduction.
-
----
-
-## 6. What Cannot Be Fixed Without More Data
-
-The following limitations are inherent to the data-generating process and cannot be
-addressed through reanalysis:
-
-- **Non-random linkage on unobservables.** The PS correction handles observable
-  selection. Men who are harder to link due to migration, name changes, or reservation
-  residence patterns — and whose mobility trajectories may differ systematically — are
-  irretrievably excluded. This is a known limitation of all CLP-based studies.
-
-- **Single observed transition.** P is estimated from one father→son generation. All
-  multi-generational projections (t≥2) are extrapolations under the stationarity
-  assumption, not observations. A longer panel (grandfather→father→son) would allow
-  both testing the Markov assumption and estimating multi-generational persistence
-  directly.
-
-- **Female mobility.** Occupational coding for women in early 20th-century censuses is
-  not comparably rich or reliable. Female AIAN mobility is simply not estimable from
-  this source.
-
-- **Geographic resolution.** Sample sizes preclude county- or reservation-level
-  analysis. The 13-region breakdown already pushes against the limits of reliable
-  estimation in several regions.
