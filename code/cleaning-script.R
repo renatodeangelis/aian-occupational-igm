@@ -120,6 +120,7 @@ modal_occ_pick = aian_clean |>
 
 aian_merged = aian_clean |>
   left_join(modal_occ_pick, by = c("pid")) |>
+  left_join(aian_age |> select(pid, birthyr_spread = spread), by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
   select(-pid, -picked_year, -starts_with("age"), -starts_with("occ1950_pop")) |>
   filter(!is.na(occ_pop)) |>
@@ -153,6 +154,7 @@ aian_merged = aian_clean |>
   relocate(starts_with("statefip_pop"), .after = histid_pop_1940) |>
   relocate(birthyr_son, .after = histid_1940) |>
   relocate(birthyr_pop, .after = histid_pop_1940) |>
+  relocate(birthyr_spread, .after = birthyr_pop) |>
   relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son_alt) |>
   relocate(lit_son, .after = educd_1940) |>

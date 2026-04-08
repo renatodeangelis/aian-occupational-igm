@@ -64,401 +64,6 @@ desc_educd = data |>
 macro_levels = unique(data$macro_pop)
 meso_levels = unique(data$meso_pop)
 
-pi_0 = function(data, level) {
-  level_sym = ensym(level)
-  level_nm  = as_string(level_sym)
-  
-  if (level_nm == "macro_pop") {
-    if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels = get("macro_levels", envir = parent.frame())
-    } else {
-      all_levels = unique(data[[level_nm]])
-      warning("macro_levels not found; falling back to unique(data$macro_pop)")
-    }
-  } else if (level_nm == "meso_pop") {
-    if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels = get("meso_levels", envir = parent.frame())
-    } else {
-      all_levels = unique(data[[level_nm]])
-      warning("meso_levels not found; falling back to unique(data$meso_pop)")
-    }
-  } else {
-    stop("`level` must be either `macro_pop` or `meso_pop`.")
-  }
-  
-  df = data |>
-    group_by(!!level_sym) |>
-    summarise(total_w = sum(w_atc_norm), .groups = "drop") |> 
-    complete(!!level_sym := all_levels, fill = list(total_w = 0)) |>
-    mutate(pi0 = total_w / sum(total_w)) %>%
-    arrange(factor(!!level_sym, levels = all_levels))
-  
-  pi0_vec = df$pi0
-  names(pi0_vec) = df[[level_nm]]
-  return(pi0_vec)
-}
-
-pi_0_unweighted = function(data, level) {
-  level_sym = rlang::ensym(level)
-  level_nm  = rlang::as_string(level_sym)
-  
-  # Determine which set of canonical levels to use (macro or meso)
-  if (level_nm == "macro_pop") {
-    if (exists("macro_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels = get("macro_levels", envir = parent.frame())
-    } else {
-      all_levels = unique(data[[level_nm]])
-      warning("macro_levels not found; falling back to unique(data$macro_pop)")
-    }
-  } else if (level_nm == "meso_pop") {
-    if (exists("meso_levels", where = parent.frame(), inherits = TRUE)) {
-      all_levels = get("meso_levels", envir = parent.frame())
-    } else {
-      all_levels = unique(data[[level_nm]])
-      warning("meso_levels not found; falling back to unique(data$meso_pop)")
-    }
-  } else {
-    stop("`level` must be either `macro_pop` or `meso_pop`.")
-  }
-  
-  # Count occurrences per level
-  df = data |>
-    dplyr::group_by(!!level_sym) |>
-    dplyr::summarise(total_n = dplyr::n(), .groups = "drop") |>
-    tidyr::complete(!!level_sym := all_levels, fill = list(total_n = 0)) |>
-    dplyr::mutate(pi0 = total_n / sum(total_n)) |>
-    dplyr::arrange(factor(!!level_sym, levels = all_levels))
-  
-  # Convert to named vector
-  pi0_vec = df$pi0
-  names(pi0_vec) = df[[level_nm]]
-  return(pi0_vec)
-}
-
-p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
-  dad_nm = as_string(ensym(level_dad))
-  son_nm = as_string(ensym(level_son))
-
-  all_levels = sort(union(unique(data[[dad_nm]]), unique(data[[son_nm]])))
-  dad_f = factor(data[[dad_nm]], levels = all_levels)
-  son_f = factor(data[[son_nm]], levels = all_levels)
-
-  tab = xtabs(data$w_atc_norm ~ dad_f + son_f)
-  rs  = rowSums(tab)
-  P   = sweep(tab, 1, ifelse(rs > 0, rs, 1), "/")
-
-  mat = base::matrix(as.numeric(P), nrow(P), ncol(P),
-                     dimnames = list(all_levels, all_levels))
-
-  if (!matrix) {
-    return(
-      expand.grid(setNames(list(all_levels, all_levels), c(dad_nm, son_nm)),
-                  stringsAsFactors = FALSE) |>
-        dplyr::mutate(P = as.vector(t(mat)))
-    )
-  }
-
-  mat
-}
-
-p_matrix_unweighted = function(data, level_dad, level_son, matrix = TRUE) {
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-  
-  dad_nm  = rlang::as_string(dad_sym)
-  son_nm  = rlang::as_string(son_sym)
-  
-  # Get all unique levels from both dad and son
-  all_levels = sort(union(unique(data[[dad_nm]]), unique(data[[son_nm]])))
-  
-  # Create all combinations (to ensure full square matrix)
-  complete_df = tidyr::expand_grid(
-    !!dad_sym := all_levels,
-    !!son_sym := all_levels
-  )
-  
-  # Count occurrences for each (dad, son) pair
-  df = data |>
-    dplyr::group_by(!!dad_sym, !!son_sym) |>
-    dplyr::summarise(n = dplyr::n(), .groups = "drop")
-  
-  # Add missing pairs (set count = 0)
-  df = dplyr::right_join(complete_df, df, by = c(dad_nm, son_nm)) |>
-    dplyr::mutate(n = ifelse(is.na(n), 0, n)) |>
-    dplyr::group_by(!!dad_sym) |>
-    dplyr::mutate(
-      n_total = sum(n),
-      P = ifelse(n_total > 0, n / n_total, 0)
-    ) |>
-    dplyr::ungroup()
-  
-  # Return tidy long form if requested
-  if (!matrix) return(df)
-  
-  # Pivot to wide matrix format
-  wide = df |>
-    dplyr::select(!!dad_sym, !!son_sym, P) |>
-    tidyr::pivot_wider(
-      names_from  = !!son_sym,
-      values_from = P,
-      values_fill = list(P = 0)
-    )
-  
-  # Add any missing rows (for dads that don’t appear)
-  missing_rows = setdiff(all_levels, wide[[dad_nm]])
-  if (length(missing_rows) > 0) {
-    extra = data.frame(matrix(0, nrow = length(missing_rows), ncol = ncol(wide)))
-    colnames(extra) = colnames(wide)
-    extra[[dad_nm]] = missing_rows
-    wide = rbind(wide, extra)
-  }
-  
-  # Order and convert to matrix
-  wide = wide[match(all_levels, wide[[dad_nm]]), ]
-  mat = as.matrix(wide |> dplyr::select(-!!dad_sym))
-  rownames(mat) = dplyr::pull(wide, !!dad_sym)
-  
-  return(mat)
-}
-
-pi_star = function(p_mat) {
-  P = as.matrix(p_mat)
-  eig = eigen(t(P))
-  idx = which.min(abs(eig$values - 1))
-  v = Re(eig$vectors[, idx])
-  if (any(v < 0)) v = abs(v)
-  pi_s = v / sum(v)
-  names(pi_s) = rownames(P)
-  return(pi_s)
-}
-
-################################################################################
-############################## ADVANCED MEASURES ###############################
-################################################################################
-
-## boot_measures_by_t: single bootstrap loop for d(t), d'(t), and AM(t) curves.
-## One resample → one p_matrix call → all (measure × t) computed from that P.
-## This replaces the old with_boot approach which ran 15 independent loops
-## (3 measures × 5 t-values), each recomputing p_matrix from scratch.
-boot_measures_by_t = function(data, level_dad, level_son,
-                               ts = 0:4, R = 1000, .seed = NULL) {
-  if (!is.null(.seed)) set.seed(.seed)
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-
-  # --- helper: evaluate all three measures at all t from a given P / pi0 / pi* ---
-  # Uses incremental matrix multiplication (Pt = Pt %*% P each step) so P^t is
-  # never recomputed from scratch. Requires ts to be sorted non-decreasing from 0.
-  compute_all = function(P, pi0, pi_s) {
-    Pt = diag(nrow(P))                    # start at P^0 = I
-    purrr::map_dfr(ts, function(tt) {
-      if (tt > 0) Pt <<- Pt %*% P         # advance one generation
-      pi_t   = as.numeric(pi0 %*% Pt)
-      n      = nrow(Pt)
-      pairs  = combn(n, 2)
-      tibble::tibble(
-        t       = tt,
-        d       = log(max(apply(Pt, 1, function(r) tv_norm(r, pi_s)))),
-        d_prime = log(max(apply(pairs, 2, function(i) tv_norm(Pt[i[1],], Pt[i[2],])))),
-        AM      = log(tv_norm(pi_t, pi_s))
-      )
-    })
-  }
-
-  # --- point estimates on the full data ---
-  P_hat   = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
-  pi0_hat = as.numeric(pi_0(data, !!dad_sym))
-  piS_hat = pi_star(P_hat)
-  point_df = compute_all(P_hat, pi0_hat, piS_hat)   # [length(ts) × 4]
-
-  # --- bootstrap: one set of resamples, one p_matrix per draw ---
-  N = nrow(data)
-  boots = replicate(R, {
-    idx   = sample.int(N, N, replace = TRUE)
-    P_b   = p_matrix(data[idx, ], !!dad_sym, !!son_sym, matrix = TRUE)
-    pi0_b = as.numeric(pi_0(data[idx, ], !!dad_sym))
-    piS_b = pi_star(P_b)
-    as.matrix(compute_all(P_b, pi0_b, piS_b)[, c("d", "d_prime", "AM")])
-  }, simplify = FALSE)
-
-  arr = simplify2array(boots)   # [nT × 3 × R]
-
-  # --- summarise: point estimate + SE + 95% percentile CI per (measure, t) ---
-  measure_nms = c("d", "d_prime", "AM")
-  purrr::map_dfr(seq_along(ts), function(i_t) {
-    purrr::map_dfr(seq_along(measure_nms), function(m_idx) {
-      v = arr[i_t, m_idx, ]
-      tibble::tibble(
-        measure = measure_nms[m_idx],
-        t       = ts[i_t],
-        est     = point_df[[measure_nms[m_idx]]][i_t],
-        se      = sd(v, na.rm = TRUE),
-        lo      = quantile(v, 0.025, na.rm = TRUE, names = FALSE),
-        hi      = quantile(v, 0.975, na.rm = TRUE, names = FALSE)
-      )
-    })
-  }) |> dplyr::mutate(dt_t = est * t)
-}
-
-boot_pmatrix_ci = function(
-    data, level_dad, level_son,
-    R = 1000, conf = 0.95, .seed = NULL){
-  if (!is.null(.seed)) set.seed(.seed)
-  
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-  
-  # point estimate
-  P_hat = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
-  rnames = rownames(P_hat); cnames = colnames(P_hat)
-  nR = nrow(P_hat); nC = ncol(P_hat)
-  
-  # one classical bootstrap draw: resample indices
-  boot_once = function() {
-    idx = sample.int(nrow(data), nrow(data), replace = TRUE)
-    d_b = data[idx, , drop = FALSE]
-    p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
-  }
-  
-  boots = replicate(R, boot_once(), simplify = FALSE)
-  arr   = simplify2array(boots)  # [rows x cols x R]
-  
-  alpha = 1 - conf
-  se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
-  q_lo   = apply(arr, c(1, 2), quantile, probs = alpha/2, na.rm = TRUE, names = FALSE)
-  q_hi   = apply(arr, c(1, 2), quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
-  
-  tibble::tibble(
-    !!dad_sym := rep(rnames, times = nC),
-    !!son_sym := rep(cnames, each  = nR),
-    est = as.vector(P_hat),
-    se  = as.vector(se_mat),
-    lo  = as.vector(q_lo),
-    hi  = as.vector(q_hi)
-  )
-}
-
-tv_norm = function(mu, nu){
-  0.5 * sum(abs(mu - nu))
-}
-
-d_t = function(data, level_dad, level_son, t = 1){
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s  = pi_star(P_mat)
-
-  P_t = P_mat %^% t
-
-  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
-
-  log(max(d_i))
-}
-
-d_prime = function(data, level_dad, level_son, t = 1){
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  
-  P_t = P_mat %^% t
-  
-  n = nrow(P_t)
-  
-  pairs = combn(n, 2)
-  dvals = apply(pairs, 2, function(idx) {
-    i = idx[1]; j = idx[2]
-    tv_norm(P_t[i, ], P_t[j, ])
-  })
-  
-  log(max(dvals))
-}
-
-am = function(data, level_dad, level_son, t = 1){
-  pi_init = pi_0(data, {{ level_dad }})
-  P_mat   = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s    = pi_star(P_mat)
-
-  P_t  = P_mat %^% t
-  pi_t = as.numeric(pi_init %*% P_t)
-
-  log(tv_norm(pi_t, pi_s))
-}
-
-im = function(data, level_dad, level_son, t = 1){
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s  = pi_star(P_mat)
-
-  P_t  = P_mat %^% t
-  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
-
-  log(im_i)
-}
-
-mu_t = function(pi0, P, t = 0) {
-  P = as.matrix(P)
-  if (t == 0) return(as.numeric(pi0))
-  as.numeric(pi0 %*% (P %^% t))
-}
-
-om = function(P, pi0, t) {
-  mu = mu_t(pi0, P, t)
-  1 - sum(mu * diag(P))
-}
-
-sm = function(P, pi0, t) {
-  mu  = mu_t(pi0, P, t)
-  mu1 = as.numeric(mu %*% P)
-  tv_norm(mu, mu1)
-}
-
-## ---- helpers to find generators of d(t) and d'(t) ----------------------------
-
-d_generator = function(P_t, pi_star) {
-  # returns the class(es) i with max || P_t(i,·) - π* ||_TV and the value
-  scores = apply(P_t, 1, function(r) tv_norm(r, pi_star))
-  mx = max(scores)
-  i_star = which(abs(scores - mx) < 1e-12)
-  list(classes = rownames(P_t)[i_star], value = mx)
-}
-
-dprime_generator = function(P_t) {
-  # returns the pair(s) (i,j) with max || P_t(i,·) - P_t(j,·) ||_TV and the value
-  n = nrow(P_t)
-  best = -Inf
-  keep = list()
-  for (i in 1:(n-1)) for (j in (i+1):n) {
-    v = tv_norm(P_t[i, ], P_t[j, ])
-    if (v > best + 1e-12) {
-      best = v
-      keep = list(c(i, j))
-    } else if (abs(v - best) <= 1e-12) {
-      keep = append(keep, list(c(i, j)))
-    }
-  }
-  pairs_named = lapply(keep, \(idx) rownames(P_t)[idx])
-  list(pairs = pairs_named, value = best)
-}
-
-identify_generators = function(data, level_dad, level_son, ts = 0:4) {
-  P = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  piS = pi_star(P)
-  
-  purrr::map_dfr(ts, function(tt) {
-    P_t = if (tt == 0) diag(nrow(P)) else P %^% tt
-    rownames(P_t) = rownames(P)
-    
-    dgen  = d_generator(P_t, piS)
-    dpgen = dprime_generator(P_t)
-    
-    tibble::tibble(
-      t               = tt,
-      d_value         = dgen$value,
-      d_classes       = paste(dgen$classes, collapse = " | "),
-      dprime_value    = dpgen$value,
-      dprime_pairs    = paste(
-        vapply(dpgen$pairs, function(p) paste(p, collapse = " vs "), character(1)),
-        collapse = "  |  "
-      )
-    )
-  })
-}
-
 ################################################################################
 ############################### IMPLEMENTATION #################################
 ################################################################################
@@ -469,7 +74,7 @@ p_mat_macro = boot_pmatrix_ci(
   R = 1000, conf = 0.95, .seed = 123)
 
 g_macro = ggplot(
-  p_mat_macro |> 
+  p_mat_macro |>
     mutate(macro_pop = factor(macro_pop, levels = rev(unique(macro_pop)))),
   aes(x = macro_son, y = macro_pop, fill = est)) +
   geom_tile(color = "white") +
@@ -539,7 +144,7 @@ p_mat_meso = boot_pmatrix_ci(
   R = 1000, conf = 0.95, .seed = 123)
 
 g_meso = ggplot(
-  p_mat_meso |> 
+  p_mat_meso |>
     mutate(meso_pop = factor(meso_pop, levels = c("unemp", "white_collar",
                                                   "crafts", "unskilled",
                                                   "farmer", "farmworker")),
@@ -682,63 +287,6 @@ combined_measures = measure_plot_macro + measure_plot_meso
 
 ## IM CURVES
 
-boot_im_by_t = function(data, level_dad, level_son, ts = 0:4, R = 1000, .seed = NULL) {
-  if (!is.null(.seed)) set.seed(.seed)
-  
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-  
-  # point estimates first
-  P0   = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
-  piS0 = pi_star(P0)
-  rowlabs = rownames(P0)
-  
-  Pt0 = diag(nrow(P0))
-  point_by_t = purrr::map(ts, function(tt) {
-    if (tt > 0) Pt0 <<- Pt0 %*% P0
-    im_vals = apply(Pt0, 1, function(r) tv_norm(r, piS0))
-    tibble::tibble(t = tt, origin = rowlabs, est = log(im_vals))
-  }) |> dplyr::bind_rows()
-  
-  # bootstrap draws (classical): resample indices, recompute P, pi*, and IM(t,i)
-  N = nrow(data)
-  boot_once = function() {
-    idx = sample.int(N, N, replace = TRUE)
-    db  = data[idx, , drop = FALSE]
-    P   = p_matrix(db, !!dad_sym, !!son_sym, matrix = TRUE)
-    piS = pi_star(P)
-    
-    Pt = diag(nrow(P))
-    out_list = vector("list", length(ts))
-    for (k in seq_along(ts)) {
-      if (ts[k] > 0) Pt = Pt %*% P
-      im_vals = apply(Pt, 1, function(r) tv_norm(r, piS))
-      out_list[[k]] = log(im_vals)
-    }
-    # returns a matrix [origins x length(ts)]
-    do.call(cbind, out_list)
-  }
-  
-  boots = replicate(R, boot_once(), simplify = FALSE)  # list of matrices
-  # stack to array: [origin x t x R]
-  arr = simplify2array(boots)
-  # names
-  dimnames(arr) = list(origin = rowlabs, t = as.character(ts), rep = NULL)
-  
-  # summarize: SE + percentile CI per (origin, t)
-  alpha = 0.05
-  summ = lapply(ts, function(tt) {
-    a2 = arr[, as.character(tt), , drop = FALSE]  # [origin x 1 x R]
-    draws_mat = drop(a2)                           # [origin x R]
-    se = apply(draws_mat, 1, sd, na.rm = TRUE)
-    lo = apply(draws_mat, 1, quantile, probs = alpha/2,     na.rm = TRUE, names = FALSE)
-    hi = apply(draws_mat, 1, quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
-    tibble::tibble(t = tt, origin = rowlabs, se = unname(se), lo = unname(lo), hi = unname(hi))
-  }) |> dplyr::bind_rows()
-  
-  dplyr::left_join(point_by_t, summ, by = c("t", "origin"))
-}
-
 # MACRO
 im_boot_macro = boot_im_by_t(data, macro_pop, macro_son, ts = 0:4, R = 1000, .seed = 123) |>
   dplyr::mutate(origin = dplyr::recode(origin,
@@ -804,7 +352,7 @@ im_meso_plot = ggplot(im_boot_meso, aes(x = t, y = est, color = origin)) +
         axis.ticks = element_line(size = 0.5)) +
   coord_cartesian(ylim = c(-8, 0))
 
-im_combined = im_macro_plot + im_meso_plot + 
+im_combined = im_macro_plot + im_meso_plot +
   plot_layout(widths = c(2, 2))
 
 # MIN AND MAX
@@ -876,77 +424,6 @@ im_minmax_meso = im_boot_meso |>
 
 ## OVERALL MOBILITY
 
-mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
-                                     R = 1000, .seed = NULL, conf = 0.95) {
-  if (!is.null(.seed)) set.seed(.seed)
-  alpha = 1 - conf
-  
-  P = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-  pi0 = pi_0(data, {{ level_dad }})
-  pi0_num = as.numeric(pi0)
-  
-  compute_series_from_P = function(Pmat, pi0_vec, ts_vec) {
-    mu = as.numeric(pi0_vec)
-    map_dfr(ts_vec, function(tt) {
-      if (tt > 0) mu <<- as.numeric(mu %*% Pmat)
-      mu1 = as.numeric(mu %*% Pmat)
-      OMv = 1 - sum(mu * diag(Pmat))
-      SMv = tv_norm(mu, mu1)
-      tibble(t = tt, OM = OMv, SM = SMv, EM = OMv - SMv)
-    })
-  }
-  
-  point_series = compute_series_from_P(P, pi0_num, ts)
-  
-  N = nrow(data)
-  inds_mat = matrix(sample.int(N, N * R, replace = TRUE), nrow = N, ncol = R)
-  
-  worker_draw = function(j) {
-    idx = inds_mat[, j]
-    dsub = data[idx, , drop = FALSE]
-    
-    P_b = p_matrix(dsub, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-    pi0_b = pi_0(dsub, {{ level_dad }})
-    
-    if (!is.null(names(pi0_b)) && !is.null(rownames(P_b)) && !all(names(pi0_b) == rownames(P_b))) {
-      if (all(names(pi0_b) %in% rownames(P_b))) {
-        pi0_b = pi0_b[rownames(P_b)]
-      } else {
-        pi0_b = as.numeric(pi0_b)
-      }
-    }
-    
-    out = compute_series_from_P(P_b, pi0_b, ts)
-    as.matrix(out |> select(OM, SM, EM))
-  }
-  
-  boots_list = lapply(seq_len(R), worker_draw)
-  
-  boots_array = simplify2array(boots_list)  # dims: (rows = length(ts)) x (cols = 3) x R
-  
-  nT = length(ts)
-  measures = c("OM", "SM", "EM")
-  est_mat = as.matrix(point_series[, measures])   # [nT × 3], pre-indexed
-
-  summarised = map_dfr(seq_len(nT), function(i_t) {
-    draws_mat = matrix(boots_array[i_t, , ], nrow = 3, ncol = R)
-
-    map_dfr(seq_len(3), function(m_idx) {
-      v = draws_mat[m_idx, ]
-      tibble(
-        t       = ts[i_t],
-        measure = measures[m_idx],
-        est     = est_mat[i_t, m_idx],
-        se      = sd(v, na.rm = TRUE),
-        lo      = quantile(v, probs = alpha/2,     na.rm = TRUE, names = FALSE),
-        hi      = quantile(v, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
-      )
-    })
-  })
-  
-  summarised
-}
-
 macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 0:6)
 meso_om = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 0:6)
 
@@ -965,35 +442,34 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
   scale_y_continuous(breaks = c(0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7)) +
   scale_linetype_manual(name = "Measure",
                         labels = c("Exchange Mobility", "Overall Mobility"),
-                        values = c("OM" = "solid", "EM" = "dashed")) +
+                        values = c(EM = "dashed", OM = "solid")) +
   scale_shape_manual(name = "Measure",
                      labels = c("Exchange Mobility", "Overall Mobility"),
-                     values = c("OM" = 16, "EM" = 17)) +
-  scale_color_manual(name = "Level",
-                     labels = c("Meso", "Macro"),
-                     values = c("macro" = "darkgreen", "meso" = "steelblue")) +
+                     values = c(EM = 17, OM = 16)) +
   scale_fill_manual(name = "Level",
-                    labels = c("Meso", "Macro"),
-                    values = c("macro" = "darkgreen", "meso" = "steelblue")) +
-  labs(y = "Probability to move") +
+                    labels = c("Meso (6 categories)", "Macro (4 categories)"),
+                    values = c("meso" = "#009E73", "macro" = "#D55E00")) +
+  scale_color_manual(name = "Level",
+                     labels = c("Meso (6 categories)", "Macro (4 categories)"),
+                     values = c("meso" = "#009E73", "macro" = "#D55E00")) +
+  labs(x = "Generation (t)",
+       y = "Mobility") +
   theme_minimal() +
-  theme(legend.position = c(1, 0.05),
-        legend.justification = c("right","bottom"),
+  theme(legend.position = "bottom",
         legend.direction = "horizontal",
         legend.text = element_text(size = 12),
-        legend.title = element_text(size = 13, face = "bold")) +
-  guides(
-    color = guide_legend(title.position = "top", direction = "horizontal"),
-    fill = guide_legend(title.position = "top", direction = "horizontal"),
-    shape = guide_legend(title.position = "top", direction = "horizontal"),
-    linetype = guide_legend(title.position = "top", direction = "horizontal")) +
+        legend.title = element_text(size = 13, face = "bold"),
+        axis.line.x = element_line(linewidth = 0.5),
+        axis.line.y = element_line(linewidth = 0.5),
+        axis.text = element_text(size = 10),
+        axis.ticks = element_line(size = 0.5)) +
   coord_cartesian(xlim = c(0, 6),
                   ylim = c(0, 0.7)); om_plot
-  
+
 ## COUNTY ESTIMATION
 
 compute_mobility_stats = function(df) {
-  
+
   p_upward = df |>
     filter(macro_pop != "nonmanual") |>
     mutate(count = (macro_son == "nonmanual") |
@@ -1001,7 +477,7 @@ compute_mobility_stats = function(df) {
     summarise(tot = sum(w_atc_norm), up = sum(count * w_atc_norm)) |>
     mutate(prop = up / tot) |>
     select(prop)
-  
+
   p_downward = df |>
     filter(macro_pop == "nonmanual" | meso_pop == "farmer" | meso_pop == "crafts") |>
     mutate(count = (macro_pop == "nonmanual" & macro_son != "nonmanual") |
@@ -1010,18 +486,18 @@ compute_mobility_stats = function(df) {
     summarise(tot = sum(w_atc_norm), down = sum(count * w_atc_norm)) |>
     mutate(prop = down / tot) |>
     select(prop)
-  
+
   d1 = d_prime(df, macro_pop, macro_son, t = 1)
-  
+
   P = p_matrix(df, macro_pop, macro_son)
   pi0 = pi_0(df, macro_pop)
-  
+
   P_unweighted = p_matrix_unweighted(df, macro_pop, macro_son)
   pi0_unweighted = pi_0_unweighted(df, macro_pop)
-  
+
   om_weighted = om(P, pi0, t = 0)
   om_unweighted = om(P_unweighted, pi0_unweighted, t = 0)
-  
+
   tibble(p_upward = round(p_upward$prop, 2),
          p_downward = round(p_downward$prop, 2),
          d_prime_1 = round(exp(d1), 2),
@@ -1116,4 +592,3 @@ upward_downward_plot = ggplot() +
         panel.grid = element_blank(),
         plot.title = element_text(size = 15, face = "bold")) +
   labs(title = "P(upward) / P(downward) by Region")
-
