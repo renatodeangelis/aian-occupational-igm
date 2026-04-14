@@ -13,7 +13,7 @@ library(maps)
 library(sf)
 library(weights)
 
-source("code/utils.R")
+source("research/projects/aian-igm/code/utils.R")
 
 data = read_csv("data/aian_weighted.csv") |>
   mutate(meso_pop = if_else(meso_pop %in% c("prof", "clerical"), "white_collar", meso_pop),

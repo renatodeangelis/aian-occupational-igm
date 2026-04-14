@@ -1,8 +1,6 @@
 library(dplyr)
 library(readr)
-library(stringr)
 library(tidyr)
-library(tibble)
 
 source("code/utils.R")
 
@@ -32,7 +30,7 @@ aian_raw = read_csv(
 aian_clean = aian_raw |>
   select(where(~ !all(is.na(.))),
          -starts_with(c("bpld", "birthyr", "gqtyped", "raced", "school_pop",
-                        "sex_pop", "sizepl", "urban", "wkswork1")),
+                        "sex_pop", "sizepl")),
          -ends_with(c("1850", "1860", "1870", "1880")),
          -age_1900, -age_1910, -age_1920, -age_1930, -countyicp_1900,
          -countyicp_1910, -countyicp_1920, -countyicp_1930, -empstatd_1910,
@@ -45,15 +43,23 @@ aian_clean = aian_raw |>
   filter(between(age_1940, 20, 44),
          sex_1940 == 1) |>
   group_by(histid_1940) |>
-  summarise(across(starts_with("w_parent"), ~ max(.x)),
-            across(6:18, ~ max(.x)),
-            across(19:23, ~ paste(unique(na.omit(.x)), collapse = "; "),
-                   .names = "{.col}"),
-            across(24:55, ~ paste(unique(na.omit(.x)), collapse = "; "),
-                   .names = "{.col}"),
-            .groups = "drop") |>
-  mutate(across(20:56, ~ na_if(.x, "")),
-         across(25:56, ~ as.integer(sub(";.*", "", .x)))) |>
+  summarise(
+    # Son's variables (age, occ, educ, etc.) and weights: identical across
+    # duplicate linked records, so max is safe
+    across(where(is.integer) & !contains("_pop_"), max),
+    # Father's histid columns: paste to detect multiple fathers per son
+    across(where(is.character),
+           ~ paste(unique(na.omit(.x)), collapse = "; ")),
+    # Father's integer characteristics: paste to detect conflicts, recover below
+    across(where(is.integer) & contains("_pop_"),
+           ~ paste(unique(na.omit(.x)), collapse = "; ")),
+    .groups = "drop") |>
+  mutate(
+    # Empty strings from all-NA groups → NA
+    across(where(is.character), ~ na_if(.x, "")),
+    # Former integer columns were pasted; take first value and restore type
+    across(contains("_pop_") & !starts_with("histid_pop"),
+           ~ as.integer(sub(";.*", "", .x)))) |>
   filter(! if_any(starts_with("histid_pop_"), 
                   ~ grepl(";", .x, fixed = TRUE))) |>
   mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
@@ -70,7 +76,6 @@ aian_age = aian_clean |>
   summarise(across(starts_with("birthyr"), ~ mean(.x, na.rm = TRUE)), .groups = "drop") |>
   rowwise() |>
   mutate(
-    n_ages = sum(!is.na(c_across(starts_with("birthyr")))),
     birth_median = round(median(c_across(starts_with("birthyr")), na.rm = TRUE)),
     spread = diff(range(c_across(starts_with("birthyr")), na.rm = TRUE))) |>
   ungroup()
@@ -93,9 +98,14 @@ modal_occ_pick = aian_clean |>
   summarise(
     birthyr_pop = dplyr::first(birthyr_pop),
     occ = {
-      vals <- unique(na.omit(occ))
+      vals <- na.omit(occ)
       if (length(vals) == 0) NA_integer_
-      else if (any(vals <= 970)) vals[vals <= 970][1] else vals[1]
+      else {
+        pool <- vals[vals <= 970]
+        if (length(pool) == 0) pool <- vals
+        tab  <- table(pool)
+        as.integer(names(tab)[which.max(tab)])
+      }
     },
     .groups = "drop") |>
   mutate(implied_age = ifelse(!is.na(birthyr_pop), year - birthyr_pop, NA_real_)) |>
@@ -104,27 +114,27 @@ modal_occ_pick = aian_clean |>
     has_pref = any(occ <= 970, na.rm = TRUE),
     occ_used = if_else(has_pref & occ <= 970, occ,
                        if_else(has_pref, NA_integer_, occ))) |>
-  filter(!is.na(occ_used)) |>
+  filter(!is.na(occ_used),
+         is.na(implied_age) | implied_age <= 65) |>
   add_count(pid, occ_used, name = "freq") |>
   filter(freq == max(freq)) |>
   mutate(age_dist = dplyr::coalesce(abs(implied_age - 40), Inf)) |>
   arrange(pid, age_dist, year) |>
-  filter(is.na(implied_age) | implied_age <= 65) |>
   slice_head(n = 1) |>
   ungroup() |>
   transmute(pid,
             occ_pop = occ_used,
-            picked_year = year,
-            age_at_pick = implied_age,
             birthyr_pop)
 
 aian_merged = aian_clean |>
   left_join(modal_occ_pick, by = c("pid")) |>
   left_join(aian_age |> select(pid, birthyr_spread = spread), by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
-  select(-pid, -picked_year, -starts_with("age"), -starts_with("occ1950_pop")) |>
-  filter(!is.na(occ_pop)) |>
-  mutate(meso_pop = classify_meso(occ_pop),
+  select(-pid, -starts_with("age"), -starts_with("occ1950_pop")) |>
+  filter(!is.na(occ_pop),
+         is.na(birthyr_spread) | birthyr_spread <= 10) |>
+  mutate(spread_flag = !is.na(birthyr_spread) & birthyr_spread > 5,
+         meso_pop = classify_meso(occ_pop),
          macro_pop = classify_macro(meso_pop),
          meso_son = classify_meso(occ_son),
          macro_son = classify_macro(meso_son),
@@ -139,15 +149,9 @@ aian_merged = aian_clean |>
                 ~ factor(.x, levels = meso_order, ordered = TRUE)),
          across(starts_with("meso_") & ends_with("_alt"),
                 ~ factor(.x, levels = meso_order_alt, ordered = TRUE))) |>
-  rowwise() |>
   mutate(
-    lit_son = {
-      v = c_across(starts_with("lit_19"))
-      if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE)},
-    lit_pop = {
-      v = c_across(starts_with("lit_pop"))
-      if (all(is.na(v))) NA_real_ else max(v, na.rm = TRUE)}) |>
-  ungroup() |>
+    lit_son = do.call(pmax, c(pick(starts_with("lit_19")), na.rm = TRUE)),
+    lit_pop = do.call(pmax, c(pick(starts_with("lit_pop")), na.rm = TRUE))) |>
   filter(school_1940 == 1) |>
   select(-starts_with("lit_19"), -starts_with("lit_pop_"), -sex_1940, -school_1940) |>
   relocate(statefip_1940, .after = histid_1940) |>
@@ -155,6 +159,7 @@ aian_merged = aian_clean |>
   relocate(birthyr_son, .after = histid_1940) |>
   relocate(birthyr_pop, .after = histid_pop_1940) |>
   relocate(birthyr_spread, .after = birthyr_pop) |>
+  relocate(spread_flag, .after = birthyr_spread) |>
   relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son_alt) |>
   relocate(lit_son, .after = educd_1940) |>

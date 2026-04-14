@@ -5,46 +5,6 @@ proposed fixes where they exist. Organized by script/stage of the pipeline.
 
 ---
 
-## 1. Cleaning (`cleaning-script.R`)
-
-### 1.1 Father birth year is averaged, but the spread is computed and never used (lines 68–73)
-
-```r
-summarise(across(starts_with("birthyr"), ~ mean(.x, na.rm = TRUE)))
-...
-spread = diff(range(...))
-```
-
-`birth_median` is taken as the median of birth year estimates across census appearances.
-`spread` (the range of those estimates) is computed but discarded. Fathers with large
-`spread` (e.g., > 5 years) have inconsistent age reports across censuses and are
-plausible false matches. These cases should be flagged or excluded.
-
-**Fix**: Join `spread` back into `aian_merged` and add a robustness check excluding
-pairs with `spread > 5`.
-
----
-
-### 1.2 Multi-valued numeric fields are silently coerced to NA (lines 50–54)
-
-```r
-across(24:55, ~ paste(unique(na.omit(.x)), collapse = "; "))
-...
-across(25:56, as.integer)
-```
-
-When a son is linked to two records in the same census wave, numeric fields (including
-`occ1950_pop_*`) are collapsed into semicolon-separated strings. `as.integer("100; 200")`
-returns `NA` silently. Fathers with multiple occupation records in the same year are
-dropped entirely rather than handled explicitly.
-
-**Fix**: Before `as.integer`, take the first value of multi-valued numeric fields:
-
-```r
-across(25:56, ~ as.integer(sub(";.*", "", .x)))
-```
----
-
 ## 2. Weighting (`weighting.R`)
 
 ### 2.3 Birth year specification is overly flexible
@@ -380,5 +340,137 @@ stationarity.
 
 **Fix**: Either drop t=0 from the plot, or mark t=1 as "observed" and t>=2 as
 "projected under stationarity."
+
+---
+
+## 5. Employment Classification (`cleaning-script.R`)
+
+### 5.1 Variable overview
+
+Four variables jointly bear on son's employment classification. Coding for 1940:
+
+| Variable | Coding |
+|---|---|
+| `labforce_1940` | 1 = not in labor force; 2 = in labor force |
+| `wkswork1_1940` | weeks worked in **prior year** (1939), 0–52 |
+| `empstatd_1940` | 10 = at work; 11 = has job, not at work; 12 = has job, not at work (emergency); 21 = seeking work (unemployed) |
+| `occ_son` (occ1950_1940) | occupation at enumeration (April 1940); > 970 = nilf/unemp |
+
+Note: `wkswork1` measures 1939 activity; `occ` and `empstatd` measure April 1940 status.
+These are different points in time and can legitimately conflict.
+
+Note: `labforce` and `empstatd` are consistent for most observations. `labforce` is
+a cruder summary; `empstatd` is more informative where they differ.
+
+---
+
+### 5.2 Current classification approach
+
+`classify_meso(occ_son)` in `utils.R` is purely occ-first:
+- `occ <= 970` → occupation category (farmer, farmworker, nonmanual, crafts, unskilled)
+- `occ > 970` → nilf
+
+`labforce_1940`, `wkswork1_1940`, and `empstatd_1940` are carried through to
+`aian_merged.csv` but play no role in classification. `nilf` and `unemp` (occ 980–998)
+are collapsed into a single category — intentional, as non-employment is kept as a
+substantively meaningful state for this population.
+
+**This is consistent with the occ-first conclusion below.**
+
+---
+
+### 5.3 Gray-area cases (aian_merged, n = 11,890)
+
+Analysis run on the cleaned linked sample. Gray areas are cases where the three signals
+conflict.
+
+**Resolved cases — no classification change needed:**
+
+| Pattern | n | Classification |
+|---|---|---|
+| in LF + valid occ + >0 wks | ~8,778 | Employ by occ |
+| not in LF + occ > 970 + 0 wks | ~1,045 | nilf |
+| in LF + occ 980–998 + 0 wks | 226 | nilf (collapsed) |
+| all occ > 970, any LF/wks | ~1,583 | nilf |
+
+**Gray areas and recommendations:**
+
+| Pattern | n | Recommendation | Certainty |
+|---|---|---|---|
+| in LF + valid occ + 0 wks, empstatd 10/11/12 | 867 | Classify by occ — currently employed, 0 wks reflects recent entry | High |
+| in LF + valid occ + 0 wks, empstatd 21 (seeking work) | 346 | Classify by occ (usual/last occ) — consistent with occ-first rule | Medium — see note |
+| not in LF + valid occ + >0 wks | 212 | Classify by occ | Medium |
+| not in LF + valid occ + 0 wks | 104 | Classify by occ | Low — most uncertain case |
+| in LF + occ=999 + 0 wks | 86 | nilf | High |
+| in LF + occ=999 + >0 wks | 50 | nilf (can't assign category) | High |
+| not in LF + occ=999 + >0 wks | 109 | nilf (current status) | Medium |
+
+**Note on empstatd=21 (346 seeking work, valid occ, 0 weeks):** These are currently
+unemployed men whose occupation code reflects usual/last occupation. Classifying them
+by occ treats occupational identity as persistent through unemployment spells, which
+is the standard assumption in occupational mobility research. The alternative — sending
+them to nilf — would mean unemployment and true non-employment are treated identically,
+which is arguably a greater distortion given that `nilf` is intended as a meaningful
+category here. However, this group is a candidate for the `wkswork_flag` robustness
+check (see 5.5).
+
+**Note on occ distribution of gray-area cases:** ~94% of gray-area cases fall in the
+three bottom meso categories (farmworker, unskilled, farmer), which is consistent
+with intermittent employment in casualized occupations.
+
+---
+
+### 5.4 Pending robustness flag
+
+A `wkswork_flag` analogous to `spread_flag` has not yet been implemented. Candidate
+definition: `empstatd_1940 == 21 & wkswork1_1940 == 0` (346 seeking-work cases with
+0 prior-year weeks). This would allow re-running the main estimates excluding this
+group without changing the primary classification. The 104 `not in LF + valid occ +
+0 wks` cases could be included in the flag as a stricter variant.
+
+---
+
+### 5.5 Two-matrix proposal (occupational identity vs. labor market attachment)
+
+**Concept:** Build two macro-level transition matrices using the same categories
+(farming / manual / nonmanual / nilf):
+
+- **Identity matrix** (current): occ-first, as implemented.
+- **Attachment matrix**: men with a valid occ code but no labor market activity
+  (best candidate rule: `empstatd == 21 & wkswork1 == 0`) reclassified to nilf.
+  Applied symmetrically to fathers and sons.
+
+Framing: not a robustness check, but a secondary analysis examining whether occupational
+persistence holds under a stricter definition of labor market participation. Motivated
+by the argument that for AIAN men at this period, formal labor market attachment was
+inconsistent and occupational identity may not have reflected active employment.
+
+**Prerequisites before pursuing:**
+
+1. **Verify wkswork1_pop_* columns exist in the raw extract.** The father-side
+   classification requires wkswork1 data for fathers. The original exclusion
+   (`starts_with("wkswork1")`) was removed, so these columns are now in `aian_clean`
+   if the extract includes them. Check before investing further.
+
+2. **Father-side rule:** use `wkswork1` from the same census year as the picked
+   occupation (`picked_year`, currently dropped from `modal_occ_pick` — would need
+   to be retained). Apply: valid occ + wkswork1 = 0 in that year → nilf in attachment
+   matrix. `empstatd` equivalent may not be consistently available for fathers across
+   census years; the father rule is therefore blunter than the son rule.
+
+3. **Gate on empirical result:** implement both matrices and compare before committing
+   to framing. The contested cases are ~10% of the sample and concentrated in the
+   bottom categories. If the matrices are nearly identical, drop the comparison.
+   If they differ in the nilf row/column in ways that speak to economic marginalization,
+   develop the framing.
+
+**Key risks:**
+
+- Class-correlated reclassification: the attachment matrix drains farmworker/unskilled
+  disproportionately (partly the point, but needs to be narrated carefully).
+- Father-son asymmetry in classification rules (empstatd available for sons, not fathers)
+  should be disclosed.
+- Threshold choice (0 weeks + seeking work) should be fixed a priori and not varied
+  to optimize results.
 
 ---
