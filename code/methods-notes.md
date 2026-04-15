@@ -59,25 +59,20 @@ include a balance table in the appendix or cite the max SMD inline as a footnote
 
 ---
 
-### 1.3 ~~Common support check refits a duplicate PS model~~ **FIXED**
-
-`compute_weights()` now returns a named list (`$data`, `$p_hat_full`). `weighting.R`
-unpacks this and uses the precomputed PS values for both the linked and unlinked samples
-in the common support block. The duplicate `glm()` call has been removed.
-
----
-
 ## 2. Regional Analysis (`transition_matrices_weighted.R`)
 
-### 2.1 Regional maps show no sample size or uncertainty
+### 2.1 Regional maps should flag California's smaller sample
 
-`om_1_plot`, `d_1_prime_plot`, and `upward_downward_plot` present point estimates for
-all 7 regions with equal visual weight. Some regions may have thin linked AIAN samples,
-making the 4×4 transition matrix unreliable.
+The analysis uses 7 regions. Six regions have n > 1,200, which is sufficient to
+estimate a 4×4 macro transition matrix with reasonable precision. California has
+n = 688 and is retained for substantive reasons (distinct labor market and policy
+context for AIAN men in this period). All regional figures should visually flag
+California — either with a lighter fill, a border marker, or an asterisk — so readers
+can discount its estimates appropriately without suppressing them.
 
-**Fix**: Compute ESS per region (now available via the `n` column added by the
-`group_modify` refactor) and either grey out regions below a threshold or overlay raw n.
-The `results_region` data frame already carries `n`; join it into `centroids`:
+ESS should still be computed per region (as noted in the previous version of this
+section) and reported in a supplement or footnote. The `results_region` data frame
+already carries `n`; ESS can be joined via:
 
 ```r
 ess_by_region = data |>
@@ -89,30 +84,72 @@ ess_by_region = data |>
   )
 ```
 
-Consider suppressing estimates for regions with ESS < 30.
+---
+
+### 2.2 Regional summary statistics: replace upward/downward ratio
+
+The current `p_upward / p_downward` ratio is not interpretable: numerator and
+denominator are computed over different base populations, and the two measures mix
+meso and macro categories asymmetrically. The ratio should be dropped entirely.
+
+**Recommended replacement: five statistics at the macro level.**
+
+Use macro categories (farming, manual, nonmanual, nilf) for all regional map
+statistics. Reserve meso categories for the global transition matrix heatmaps and
+IM curves, where the richer classification adds value without the cross-region
+comparability problem.
+
+The five regional statistics, and their logic:
+
+| Statistic | Interpretation |
+|---|---|
+| **SM** (structural mobility) | Share of observed movement forced by shifts in the marginal occupational distribution. High SM means sons couldn't stay in their fathers' occupations because those occupations were disappearing — the direct correlate of land dispossession and reservation confinement. |
+| **EM** (exchange mobility) | Share of observed movement representing genuine rank-switching, net of structural change. EM and SM together decompose OM: if EM is near zero and SM is high, the paper's argument is that observed mobility is forced rather than achieved. |
+| **P(son = manual \| father = farming)** | The proletarianization rate: farming families whose sons ended up in manual wage labor. The headline cell for the paper's structural narrative. Well-estimated with n > 1,200. |
+| **P(son = farming \| father = farming)** | Farming persistence. Regional variation in this cell maps onto variation in land loss intensity under allotment. Paired with the preceding statistic, it shows what happened to farming families: some reproduced, most proletarianized. |
+| **P(son = nilf \| father = farming)** | Labor force exit from the farming sector. Provides the third branch of the farming-family story: exit into nonemployment rather than wage labor. |
+
+Statistics 3–5 together give a complete decomposition of farming-family outcomes
+across regions. Regional variation in their relative magnitudes is the core empirical
+contribution of the regional analysis.
+
+**Honorable mention**: P(son ≠ nilf | father = nilf) — exit from nonemployment — is
+well-defined and has adequate n, but covaries strongly with the nilf exit rate above.
+Include in a regional table; probably not on the map.
+
+**Excluded statistics and reasons**:
+
+- *OM alone*: conflates direction and magnitude; sensitive to marginal distributions
+  in ways that make raw cross-region comparison misleading. Report only as the sum
+  EM + SM.
+- *d'(1) on regional maps*: see issue 2.3 below.
+- *Upward/downward rates (meso)*: asymmetric base populations; ordinality between
+  farmer and farmworker is contested; equivalent story told more cleanly by the macro
+  statistics above.
+- *IM(t, i) curves by region*: still feasible with n > 1,200 for major origin
+  categories; consider including in an appendix for completeness.
 
 ---
 
-### 2.2 The upward/downward mobility ratio is not well defined
+### 2.3 d'(1) is not cross-regionally comparable on maps
 
-`p_upward` and `p_downward` are computed over different sub-populations of fathers,
-so their denominators are not comparable. The ratio `p_upward / p_downward` cannot be
-interpreted as "X upward movers per downward mover."
+`d_prime_1` measures the distance between the son's marginal distribution and the
+region's own stationary distribution after one generation. Because the stationary
+distribution is endogenous to each region's P matrix, two regions with equal d'(1)
+may have completely different mobility regimes and completely different targets.
+Cross-regional comparison of d'(1) is comparing distances to different endpoints.
 
-Additionally, the downward definition uses meso categories (`meso_pop == "farmer"`,
-`meso_pop == "crafts"`) while the upward definition uses macro categories — the two
-measures are not constructed symmetrically.
-
-**Fix**: Either (a) define both measures over the same base population, (b) report the
-two rates separately rather than as a ratio, or (c) replace with absolute upward
-mobility: `P(macro_son == "nonmanual")` unconditional on father's class, which has a
-clean interpretation and is directly comparable across regions.
+**Fix**: Remove d'(1) from regional maps. Retain it in the global analysis (where
+there is a single P and a single stationary distribution) and in the cohort
+stationarity supplement. If a convergence scalar is needed for the regional maps,
+EM captures the same intuition (how much rank-switching occurs, net of structural
+change) without the reference-point problem.
 
 ---
 
-## 4. Employment Classification (`cleaning-script.R`)
+## 3. Employment Classification (`cleaning-script.R`)
 
-### 4.1 Variable overview
+### 3.1 Variable overview
 
 Four variables jointly bear on son's employment classification. Coding for 1940:
 
@@ -131,7 +168,7 @@ a cruder summary; `empstatd` is more informative where they differ.
 
 ---
 
-### 4.2 Current classification approach
+### 3.2 Current classification approach
 
 `classify_meso(occ_son)` in `utils.R` is purely occ-first:
 - `occ <= 970` → occupation category (farmer, farmworker, nonmanual, crafts, unskilled)
@@ -146,7 +183,7 @@ substantively meaningful state for this population.
 
 ---
 
-### 4.3 Gray-area cases (aian_merged, n = 11,890)
+### 3.3 Gray-area cases (aian_merged, n = 11,890)
 
 Analysis run on the cleaned linked sample. Gray areas are cases where the three signals
 conflict.
@@ -179,7 +216,7 @@ is the standard assumption in occupational mobility research. The alternative �
 them to nilf — would mean unemployment and true non-employment are treated identically,
 which is arguably a greater distortion given that `nilf` is intended as a meaningful
 category here. However, this group is a candidate for the `wkswork_flag` robustness
-check (see 4.5).
+check (see 3.5).
 
 **Note on occ distribution of gray-area cases:** ~94% of gray-area cases fall in the
 three bottom meso categories (farmworker, unskilled, farmer), which is consistent
@@ -187,7 +224,7 @@ with intermittent employment in casualized occupations.
 
 ---
 
-### 4.4 Pending robustness flag
+### 3.4 Pending robustness flag
 
 A `wkswork_flag` analogous to `spread_flag` has not yet been implemented. Candidate
 definition: `empstatd_1940 == 21 & wkswork1_1940 == 0` (346 seeking-work cases with
@@ -197,7 +234,7 @@ group without changing the primary classification. The 104 `not in LF + valid oc
 
 ---
 
-### 4.5 Two-matrix proposal (occupational identity vs. labor market attachment)
+### 3.5 Two-matrix proposal (occupational identity vs. labor market attachment)
 
 **Concept:** Build two macro-level transition matrices using the same categories
 (farming / manual / nonmanual / nilf):
@@ -241,3 +278,295 @@ inconsistent and occupational identity may not have reflected active employment.
   to optimize results.
 
 ---
+
+## 4. Paper Framing and Scope
+
+### 4.1 Core framing decision
+
+This is a descriptive baseline paper. Its contribution is to produce the first
+systematic quantitative evidence on the structure and magnitude of intergenerational
+occupational mobility among AIAN men in the late 19th–early 20th century. The correct
+framing is: "We document the occupational structure and its intergenerational
+transmission for a population whose economic history has been studied qualitatively
+but not quantified at this scale."
+
+The paper should not present itself as identifying causes of mobility or making
+causal comparisons across groups. The Markov chain machinery is a descriptive tool,
+not a structural model.
+
+---
+
+### 4.2 Paper structure
+
+**Main text:**
+
+1. Weighted macro transition matrices (P, pi_0, pi*) — the primary descriptive object
+2. EM/SM decomposition — the main analytical contribution; the ratio SM/(SM+EM) is
+   the paper's headline finding
+3. Regional analysis: five statistics (SM, EM, P(manual|farming), P(farming|farming),
+   P(nilf|farming)) as maps and a regional table
+4. Cohort stationarity results — brief table, not a supplement
+
+**Appendix:**
+
+- Meso-level transition matrices (support the macro results)
+- d(t), d'(t), IM curves (characterize the Markov chain mathematically; informative
+  but not the story)
+- Log-linear UNIDIFF analysis by region (tests whether regional variation is a matter
+  of degree vs. kind; use macro 4×4 to avoid sparse cells)
+- Robustness checks: spread_flag exclusions, wkswork_flag (once implemented), 25–44
+  age restriction
+- Balance table from `output/balance_table.csv`
+
+**Cut or defer:**
+
+- Multi-generation projections as a narrative device — one sentence on the implied
+  steady state is enough
+- Two-matrix proposal (section 3.5) — defer to future work; do not add to this paper
+
+---
+
+### 4.3 Abstract and introduction framing
+
+The abstract should open with the gap and the data, not the methods:
+
+> "No systematic quantitative evidence exists on intergenerational occupational
+> mobility for Native American men in the early 20th century. We use linked 1900–1940
+> U.S. Census records to document the structure of father-son occupational mobility
+> for this population. We find that observed mobility was overwhelmingly structural —
+> driven by the collapse of the farming sector — rather than achieved through
+> individual rank-switching, consistent with the historical record of allotment-era
+> dispossession."
+
+The introduction should spend more words on historical context (allotment, land
+dispossession, reservation confinement) and less on the Markov chain framework.
+Readers need to understand why this period and this population matter before
+encountering the first equation.
+
+Three limitations should be named clearly in the introduction, once, and not repeated:
+
+1. **Linkage selection**: estimates represent men who can be linked; if geographic
+   mobility and occupational mobility are positively correlated, these are lower
+   bounds on true mobility.
+2. **No within-sample comparison group**: magnitudes are contextualised via parallel
+   work on other populations.
+3. **Occupation measurement**: occ1950 codes applied to pre-1940 AIAN labor markets
+   introduce measurement noise, particularly for casual and subsistence work.
+
+---
+
+### 4.4 Methods section framing
+
+Order: data → weighting → mobility measures. Do not lead with the Markov chain
+framing; lead with the transition matrix as a descriptive object.
+
+Present PS weighting as a correction for known selection, not as a technical
+contribution. One paragraph on the selection problem, one on ATC weighting as the
+solution for observable characteristics, one sentence acknowledging unobservable
+selection remains and noting the likely direction of bias.
+
+Retire "Markov chain" from the front half of the paper. Use "weighted transition
+matrix" as the primary term; the Markov interpretation can appear when discussing
+the convergence measures in the appendix.
+
+---
+
+### 4.5 Results section framing
+
+Lead with the transition matrix figure — give the reader the full picture first.
+Then decompose into EM and SM. Narrative structure:
+
+1. Here is the overall pattern (macro P matrix + pi_0 + pi*)
+2. Here is how much of it is structural displacement vs. rank switching (EM/SM)
+3. Here is how it varies regionally (maps + table)
+
+Do not present the regional matrices in the main text (7 × 4×4 = 112 cells; no
+reader will absorb these inline). The regional section is maps and a summary table.
+
+---
+
+### 4.6 Code changes required for reframing
+
+**`compute_mobility_stats()` in `transition_matrices_weighted.R`** currently computes
+`p_upward`, `p_downward`, `d_prime_1`, `om_weighted`, and `om_unweighted`. Replace
+with SM, EM, and the three conditional probabilities:
+
+```r
+compute_mobility_stats = function(df) {
+  df = df |> mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
+
+  P      = p_matrix(df, macro_pop, macro_son, weighted = TRUE)
+  pi0    = pi_0(df, macro_pop)
+  pistar = pi_star(P)
+
+  om_val = om(P, pi0, t = 0)
+  sm_val = sum(abs(as.numeric(pi0) - as.numeric(pistar))) / 2
+  em_val = om_val - sm_val
+
+  # Farming-family decomposition
+  farming_rows = df |> filter(macro_pop == "farming")
+  p_manual_given_farming = weighted.mean(
+    farming_rows$macro_son == "manual", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_farming_given_farming = weighted.mean(
+    farming_rows$macro_son == "farming", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_nilf_given_farming = weighted.mean(
+    farming_rows$macro_son == "nilf", farming_rows$w_atc_norm, na.rm = TRUE)
+
+  tibble(
+    sm                   = round(sm_val, 3),
+    em                   = round(em_val, 3),
+    om                   = round(om_val, 3),
+    p_manual_fm_farming  = round(p_manual_given_farming, 3),
+    p_farming_fm_farming = round(p_farming_given_farming, 3),
+    p_nilf_fm_farming    = round(p_nilf_given_farming, 3)
+  )
+}
+```
+
+Note: `p_manual_fm_farming + p_farming_fm_farming + p_nilf_fm_farming + p_nonmanual_fm_farming = 1`
+by construction; the three statistics above plus the (small) nonmanual rate fully
+decompose farming-father outcomes.
+
+**Regional maps**: replace the three current map calls (`om_1_plot`, `d_1_prime_plot`,
+`upward_downward_plot`) with maps of SM, EM, and the three conditional probabilities.
+
+**Cohort stationarity (section 7 of the script)**: move results to be printed as a
+formatted table for inclusion in the main text, not just `cat()` output.
+
+---
+
+### 4.7 Birth cohort treatment
+
+The 20–44 age range for sons is retained as the main analysis. Three reasons:
+
+1. The dominant occupation categories (farmer, farmworker, unskilled, nilf) are
+   not subject to the early-career instability that motivates age restrictions in
+   white-collar samples. A 22-year-old AIAN farmworker in 1940 is in a stable
+   occupational category, not a career placeholder.
+2. Restricting to 25–44 loses ~44% of the sample (12,000 → 6,700) and would require
+   pooling regions further, reducing the regional analysis.
+3. The cohort stationarity test is the appropriate tool for addressing the reviewer
+   concern about life cycle and cohort effects — it tests directly whether pooling
+   across birth cohorts is warranted.
+
+**Robustness check**: run the main transition matrices on the 25–44 subsample and
+report the comparison in a footnote or appendix table. If results are substantively
+similar, the age restriction does not change the findings and the full sample is
+preferable on power grounds. Report the direction of any differences.
+
+The cohort stationarity section (section 7 of `transition_matrices_weighted.R`)
+should be elevated to the main text as a brief table showing OM(1) and d'(1) by
+birth cohort, with a one-sentence interpretation of whether the pooled P matrix
+is warranted.
+
+---
+
+## 5. Work Plan
+
+### 5.1 Prerequisites
+
+Confirm `data/aian_merged.csv` is stale (cleaning changes not yet rerun) and that
+R is pointed at the project root. Scripts must run in pipeline order:
+`cleaning-script.R` → `weighting.R` → `transition_matrices_weighted.R`.
+
+---
+
+### 5.2 Block 1 — Run cleaning and read diagnostics (45 min)
+
+**Goal:** Verify new cleaning changes (MAD spread, son-age tiebreaker) and understand
+where observations are lost.
+
+1. `source("code/cleaning-script.R")` — read console output carefully
+2. Record the six counts: raw → age/sex → dedup → occ_pop recovery → spread filter
+   → school filter → final
+3. Check: is MAD ≤ 4 dropping more or fewer than the old range ≤ 10? If
+   substantially more, adjust threshold
+4. Spot check: `table(aian_merged$meso_pop, aian_merged$meso_son)` for plausibility
+5. Bonus if time: `table(aian_merged$occ_son[aian_merged$meso_son == "nilf"])` to
+   assess occ == 999 contamination in the nilf row (see issue 3.2)
+
+If cleaning looks clean, run `source("code/weighting.R")`.
+
+---
+
+### 5.3 Block 2 — Fix `compute_mobility_stats()` (1.5 hours)
+
+**Goal:** Replace broken upward/downward logic with SM, EM, and three conditional
+probabilities (see section 4.6 for full replacement code).
+
+After implementing, verify:
+- `sm + em ≈ om` for each region
+- Three conditional probabilities sum to < 1 (nonmanual is the fourth branch)
+- `results_region` carries: `sm`, `em`, `om`, `p_manual_fm_farming`,
+  `p_farming_fm_farming`, `p_nilf_fm_farming`
+
+---
+
+### 5.4 Block 3 — Update regional maps (45 min)
+
+**Goal:** Replace the three old map calls with five new statistics; flag California.
+
+1. Replace `om_1_plot`, `d_1_prime_plot`, `upward_downward_plot` with five new map
+   calls using updated `results_region` columns
+2. Flag California: add `low_n = (n < 800)` to `centroids` and append an asterisk
+   to the label via `geom_sf_text`
+3. Visually inspect: SM should be high in Oklahoma/Plains where allotment was most
+   aggressive; farming persistence should be higher in regions with stronger land
+   retention
+
+---
+
+### 5.5 Block 4 — Wire bootstrap reweighting (2 hours)
+
+**Goal:** Fix issue 1.1. Infrastructure exists in `utils.R`; wiring is missing.
+
+Scope: wire `boot_with_reweighting()` (template in section 1.1) into
+`boot_pmatrix_ci` first as proof of concept, then `boot_measures_by_t`. The other
+two bootstrap functions (`boot_im_by_t`, `mobility_curve_with_boot`) can follow the
+same pattern in a second session if time runs short.
+
+Requires `aian_merged` (unweighted) and `aian_full` (full AIAN extract from
+`weighting.R`) to be available in the environment. Verify `aian_full` persists after
+sourcing `weighting.R`, or save it to a file.
+
+**Highest risk of overrunning.** If blocked past one hour, note the issue and move on.
+
+---
+
+### 5.6 Block 5 — Cohort stationarity table (30 min)
+
+**Goal:** Elevate section 7 of `transition_matrices_weighted.R` from `cat()` output
+to a formatted table for the main text.
+
+Replace the loop with `purrr::map_dfr` returning a tidy data frame. Table should
+show: cohort, n, ESS, OM(1), d'(1) — four columns, three rows.
+
+---
+
+### 5.7 Block 6 — 2×2 LF participation matrix (45 min)
+
+**Goal:** Supplementary analysis of intergenerational LF participation persistence
+(motivated by nilf→nilf measurement issues; see section 3.2).
+
+1. Confirm `labforce_pop_*` columns are in `aian_merged`
+2. Define father's LF status from the labforce value in the census year matching
+   `occ_pop` (same year as the picked occupation)
+3. Build weighted 2×2: father LF (1/2) × son LF (1/2)
+4. Output: four cells with bootstrap CIs — a table, not a heatmap
+
+---
+
+### 5.8 End of day — Full pipeline run (30 min)
+
+Source all three scripts in order. Verify outputs exist and all figures render.
+Note errors or unexpected results for the next session.
+
+---
+
+### 5.9 Not covered in this session
+
+- Log-linear UNIDIFF (appendix — second session)
+- `wkswork_flag` implementation (section 3.4 — straightforward, not urgent)
+- 25–44 age robustness check (one-liner once main analysis is stable; see section 4.7)
+- Full bootstrap reweighting for `boot_im_by_t` and `mobility_curve_with_boot`
+  (continue from block 4)
