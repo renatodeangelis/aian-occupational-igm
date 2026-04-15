@@ -35,18 +35,13 @@ meso_order_alt = c("farmer", "unskilled", "crafts", "nonmanual", "nilf")
 
 assign_region = function(statefip) {
   case_when(
-    statefip %in% c(8, 16, 32, 49, 56)  ~ "basin",
-    statefip == 6                         ~ "cali",
-    statefip %in% c(27, 55)               ~ "lakes",
-    statefip %in% c(17, 18, 26, 39)       ~ "midwest",
-    statefip == 37                        ~ "nc",
-    statefip %in% c(9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "ne",
-    statefip %in% c(30, 38, 46)           ~ "plains",
-    statefip %in% c(41, 53)               ~ "nw",
-    statefip == 40                        ~ "ok",
-    statefip %in% c(19, 20, 29, 31)       ~ "prairie",
-    statefip %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54) ~ "south",
-    statefip %in% c(4, 35)                ~ "sw",
+    statefip == 6 ~ "cali",
+    statefip %in% c(27, 55, 17, 18, 26, 39, 9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "north",
+    statefip %in% c(8, 16, 32, 49, 56, 41, 53)  ~ "nw",
+    statefip == 40 ~ "ok",
+    statefip %in% c(19, 20, 29, 31, 30, 38, 46) ~ "plains",
+    statefip %in% c(1, 5, 12, 13, 21, 22, 28, 37, 45, 47, 48, 51, 54) ~ "south",
+    statefip %in% c(4, 35) ~ "sw",
     TRUE ~ NA_character_)
 }
 
@@ -67,7 +62,9 @@ classify_education = function(educd) {
 compute_weights = function(df_linked, df_full) {
   # df_linked: linked father-son pairs (possibly a bootstrap resample)
   # df_full:   full AIAN comparison sample (held fixed)
-  # Returns df_linked with p_hat, w_atc, and w_atc_norm columns added.
+  # Returns a list:
+  #   $data       — df_linked with p_hat, w_atc, w_atc_norm added
+  #   $p_hat_full — PS predictions for df_full from the same model
 
   comb = dplyr::bind_rows(
     df_linked |> dplyr::mutate(linked = 1),
@@ -81,15 +78,20 @@ compute_weights = function(df_linked, df_full) {
       region    = as.factor(region),
       education = as.factor(education))
 
-  model = glm(linked ~ cohort * region + education * region + statefip_1940,
+  model = glm(linked ~ cohort * region + education * region + statefip_1940 + urban_1940,
               data = comb, family = binomial)
 
-  df_linked |>
-    dplyr::mutate(
-      p_hat      = predict(model, newdata = df_linked, type = "response"),
-      w_atc      = (1 - p_hat) / p_hat,
-      w_atc_norm = w_atc * dplyr::n() / sum(w_atc)
-    )
+  comb_full = dplyr::filter(comb, linked == 0)
+
+  list(
+    data = df_linked |>
+      dplyr::mutate(
+        p_hat      = predict(model, newdata = df_linked, type = "response"),
+        w_atc      = (1 - p_hat) / p_hat,
+        w_atc_norm = w_atc * dplyr::n() / sum(w_atc)
+      ),
+    p_hat_full = predict(model, newdata = comb_full, type = "response")
+  )
 }
 
 # --- Transition matrix and distribution functions ---
@@ -238,6 +240,17 @@ p_matrix_unweighted = function(data, level_dad, level_son, matrix = TRUE) {
   rownames(mat) = dplyr::pull(wide, !!dad_sym)
 
   return(mat)
+}
+
+verify_ergodic = function(P, label = NULL) {
+  eigs = abs(Re(eigen(t(as.matrix(P)))$values))
+  n_unit = sum(abs(eigs - 1) < 1e-8)
+  if (n_unit != 1) {
+    msg = sprintf("P has %d unit eigenvalues; stationary distribution is not unique.", n_unit)
+    if (!is.null(label)) msg = paste0("[", label, "] ", msg)
+    warning(msg)
+  }
+  invisible(n_unit == 1)
 }
 
 pi_star = function(p_mat) {

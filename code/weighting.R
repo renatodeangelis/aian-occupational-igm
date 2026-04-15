@@ -11,7 +11,7 @@ aian_merged = read_csv("data/aian_merged.csv") |>
          education = classify_education(educd_1940))
 
 aian_full = read_csv(
-  file = "https://www.dropbox.com/scl/fi/imhz0zujc9dfhx3dc6kox/usa_00021.csv?rlkey=1b5xq14od1cky4iyvfbrob413&st=ndwbat7q&dl=1") |>
+  file = "https://www.dropbox.com/scl/fi/rdgea171s0uztwasmojkx/usa_00022.csv?rlkey=msbupznr1hq12ejf305vdk2kx&st=s1qmh2in&dl=1") |>
   janitor::clean_names() |>
   filter(age >= 20 & age < 45,
          school == 1) |>
@@ -22,16 +22,16 @@ aian_full = read_csv(
          macro_son_alt = classify_macro(meso_son_alt),
          region = assign_region(statefip),
          education = classify_education(educd)) |>
-  rename(statefip_1940 = statefip)
+  rename(statefip_1940 = statefip, urban_1940 = urban)
 
 # --- Point estimate weights via compute_weights() ---
-aian_ps = compute_weights(aian_merged, aian_full)
+weights_out = compute_weights(aian_merged, aian_full)
+aian_ps     = weights_out$data
 
-# --- 2.7 fix: Common support diagnostics ---
-# Rebuild combined dataset with PS for the diagnostic plot
+# --- Common support diagnostics (reuses p_hat from compute_weights) ---
 aian_comb = bind_rows(
-  aian_ps |> mutate(linked = 1),
-  aian_full |> mutate(linked = 0)
+  aian_ps   |> mutate(linked = 1),
+  aian_full |> mutate(linked = 0, p_hat = weights_out$p_hat_full)
 ) |>
   mutate(
     cohort    = cut(birthyr_son,
@@ -41,12 +41,6 @@ aian_comb = bind_rows(
     region    = as.factor(region),
     education = as.factor(education))
 
-ps_model = glm(linked ~ cohort * region + education * region + statefip_1940,
-               data = aian_comb, family = binomial)
-
-aian_comb = aian_comb |>
-  mutate(p_hat = predict(ps_model, newdata = aian_comb, type = "response"))
-
 p_support = ggplot(aian_comb,
     aes(x = p_hat, fill = factor(linked, labels = c("Unlinked", "Linked")))) +
   geom_density(alpha = 0.5) +
@@ -54,7 +48,7 @@ p_support = ggplot(aian_comb,
   theme_minimal()
 ggsave("figures/ps_common_support.png", p_support, width = 7, height = 4)
 
-ps_range_linked = range(aian_comb$p_hat[aian_comb$linked == 1])
+ps_range_linked   = range(aian_comb$p_hat[aian_comb$linked == 1])
 ps_range_unlinked = range(aian_comb$p_hat[aian_comb$linked == 0])
 cat("PS range — linked:", round(ps_range_linked, 4),
     " unlinked:", round(ps_range_unlinked, 4), "\n")
@@ -93,12 +87,14 @@ aian_comb_bal = aian_comb |>
   left_join(aian_ps |> select(histid_1940, w_atc_norm), by = "histid_1940") |>
   mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm))
 
-bt = bal.tab(linked ~ cohort + region + education,
+bt = bal.tab(linked ~ cohort + region + education + urban_1940,
              data = aian_comb_bal, weights = "w_atc_norm",
              method = "weighting", estimand = "ATC",
              un = TRUE)
 cat("\n--- Covariate balance (substantive variables) ---\n")
 print(bt)
+dir.create("output", showWarnings = FALSE)
+write_csv(as.data.frame(bt$Balance), "output/balance_table.csv")
 
 bt_state = bal.tab(linked ~ statefip_1940,
                    data = aian_comb_bal, weights = "w_atc_norm",
@@ -113,6 +109,7 @@ if (any(abs(state_smds) > 0.2)) {
   cat("WARNING: States with |SMD| > 0.2:",
       paste(bad_states, collapse = ", "), "\n")
 }
+write_csv(as.data.frame(bt_state$Balance), "output/balance_table_state.csv")
 
 # --- Finalize and write ---
 aian_ps = aian_ps |>

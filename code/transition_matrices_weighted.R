@@ -16,8 +16,7 @@ library(weights)
 source("research/projects/aian-igm/code/utils.R")
 
 data = read_csv("data/aian_weighted.csv") |>
-  mutate(meso_pop = if_else(meso_pop %in% c("prof", "clerical"), "white_collar", meso_pop),
-         meso_son = if_else(meso_son %in% c("prof", "clerical"), "white_collar", meso_son))
+  mutate(w_atc_norm = w_trim_norm)
 
 macro_levels = unique(data$macro_pop)
 meso_levels = unique(data$meso_pop)
@@ -227,8 +226,12 @@ p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son, R = 1000, conf = 0.95, .
 # Initial and stationary distributions
 pi0_vec_macro = pi_0(data, macro_pop)
 pi0_vec_meso  = pi_0(data, meso_pop)
-steady_macro  = pi_star(p_matrix(data, macro_pop, macro_son, TRUE))
-steady_meso   = pi_star(p_matrix(data, meso_pop, meso_son, TRUE))
+P_macro_global = p_matrix(data, macro_pop, macro_son, TRUE)
+P_meso_global  = p_matrix(data, meso_pop, meso_son, TRUE)
+verify_ergodic(P_macro_global, "macro global")
+verify_ergodic(P_meso_global,  "meso global")
+steady_macro  = pi_star(P_macro_global)
+steady_meso   = pi_star(P_meso_global)
 
 # d(t), d'(t), AM bootstrap
 results_macro = boot_measures_by_t(data, macro_pop, macro_son, ts = ts, R = 1000, .seed = 123)
@@ -238,19 +241,19 @@ results_meso  = boot_measures_by_t(data, meso_pop, meso_son, ts = ts, R = 1000, 
 im_boot_macro = boot_im_by_t(data, macro_pop, macro_son, ts = 0:4, R = 1000, .seed = 123) |>
   mutate(origin = recode(origin,
                          farming = "Farming", manual = "Manual",
-                         nonmanual = "Nonmanual", unemp = "Not working"))
+                         nonmanual = "Nonmanual", nilf = "Not working"))
 
 im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed = 123) |>
   mutate(origin = recode(origin, farmer = "Farmer", unskilled = "Unskilled",
                          crafts = "Crafts", white_collar = "White Collar",
-                         unemp = "Not working", farmworker = "Farmworker"),
+                         nilf = "Not working", farmworker = "Farmworker"),
          origin = factor(origin, levels = c("Farmer", "Farmworker", "Crafts",
                                             "Unskilled", "White Collar",
                                             "Not working")))
 
 # Overall mobility bootstrap
-macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 0:6)
-meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 0:6)
+macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 1:6)
+meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 1:6)
 
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
   mutate(level = factor(level, labels = c("meso", "macro"))) |>
@@ -260,7 +263,7 @@ om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)
 ############################# 5. PLOTTING ######################################
 ################################################################################
 
-meso_level_order = c("unemp", "white_collar", "crafts", "unskilled", "farmer", "farmworker")
+meso_level_order = c("nilf", "nonmanual", "crafts", "unskilled", "farmer", "farmworker")
 
 ## Transition matrix heatmaps ----
 
@@ -340,10 +343,12 @@ om_plot
 ################################################################################
 
 compute_mobility_stats = function(df) {
+  df = df |> mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
+
   p_upward = df |>
     filter(macro_pop != "nonmanual") |>
     mutate(count = (macro_son == "nonmanual") |
-             (macro_pop == "unemp" & macro_son != "unemp")) |>
+             (macro_pop == "nilf" & macro_son != "nilf")) |>
     summarise(tot = sum(w_atc_norm), up = sum(count * w_atc_norm)) |>
     mutate(prop = up / tot) |>
     select(prop)
@@ -351,8 +356,8 @@ compute_mobility_stats = function(df) {
   p_downward = df |>
     filter(macro_pop == "nonmanual" | meso_pop == "farmer" | meso_pop == "crafts") |>
     mutate(count = (macro_pop == "nonmanual" & macro_son != "nonmanual") |
-             (meso_pop == "farmer" & meso_son %in% c("unskilled", "farmworker", "unemp")) |
-             (meso_pop == "crafts" & meso_son %in% c("unskilled", "farmworker", "unemp"))) |>
+             (meso_pop == "farmer" & meso_son %in% c("unskilled", "farmworker", "nilf")) |
+             (meso_pop == "crafts" & meso_son %in% c("unskilled", "farmworker", "nilf"))) |>
     summarise(tot = sum(w_atc_norm), down = sum(count * w_atc_norm)) |>
     mutate(prop = down / tot) |>
     select(prop)
@@ -360,6 +365,7 @@ compute_mobility_stats = function(df) {
   d1 = d_prime(df, macro_pop, macro_son, t = 1)
 
   P = p_matrix(df, macro_pop, macro_son)
+  verify_ergodic(P, paste("region:", unique(df$region)))
   pi0 = pi_0(df, macro_pop)
 
   P_unweighted = p_matrix_unweighted(df, macro_pop, macro_son)
@@ -377,12 +383,9 @@ compute_mobility_stats = function(df) {
 
 results_region = data |>
   group_by(region) |>
-  count() |>
-  mutate(stats = purrr::map(region, function(re) {
-    df_sub = data |> filter(region == re)
-    compute_mobility_stats(df_sub)
-  })) |>
-  unnest(stats)
+  group_modify(~ compute_mobility_stats(.x)) |>
+  ungroup() |>
+  left_join(count(data, region), by = "region")
 
 state_regions = tibble(
   state_name = tolower(c(
@@ -421,7 +424,7 @@ centroids = st_centroid(regions_sf) |>
 ## Regional maps ----
 
 om_1_plot = plot_region_map(states_sf, regions_sf, centroids,
-                            om_1_unweighted, om_1_unweighted,
+                            om_1, om_1,
                             "OM(0) by Region")
 
 d_1_prime_plot = plot_region_map(states_sf, regions_sf, centroids,
@@ -432,3 +435,50 @@ upward_downward_plot = plot_region_map(states_sf, regions_sf, centroids,
                                       round(p_upward / p_downward, 2),
                                       round(p_upward / p_downward, 2),
                                       "P(upward) / P(downward) by Region")
+
+################################################################################
+#################### 7. SUPPLEMENTARY: COHORT STATIONARITY ####################
+################################################################################
+
+# Split into three birth cohorts and compare macro transition matrices.
+# Tests whether the pooled P matrix is stable across the observation window.
+# Sons born 1896-1920 span WWI, the 1920s labour market, and the early Depression.
+
+cohort_labels = c("1896-1905", "1906-1915", "1916-1920")
+
+data_cohorts = data |>
+  mutate(cohort_group = cut(birthyr_son,
+                            breaks = c(1895, 1905, 1915, 1921),
+                            labels = cohort_labels))
+
+cohort_ns = data_cohorts |>
+  count(cohort_group) |>
+  mutate(ess = map_dbl(cohort_group, function(cg) {
+    d = filter(data_cohorts, cohort_group == cg)
+    sum(d$w_atc_norm)^2 / sum(d$w_atc_norm^2)
+  }))
+
+cat("\n--- Cohort sample sizes ---\n")
+print(cohort_ns)
+
+cohort_results = cohort_labels |>
+  purrr::map(function(cg) {
+    d = filter(data_cohorts, cohort_group == cg) |>
+      mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
+    P   = p_matrix(d, macro_pop, macro_son)
+    pi0 = pi_0(d, macro_pop)
+    list(
+      cohort  = cg,
+      P       = P,
+      om      = round(om(P, pi0, t = 1), 3),
+      d_prime = round(exp(d_prime(d, macro_pop, macro_son, t = 1)), 3)
+    )
+  })
+
+cat("\n--- Macro transition matrices by cohort ---\n")
+for (res in cohort_results) {
+  cat("\nCohort:", res$cohort,
+      "  OM(1) =", res$om,
+      "  d'(1) =", res$d_prime, "\n")
+  print(round(res$P, 3))
+}
