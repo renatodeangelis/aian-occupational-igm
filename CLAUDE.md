@@ -45,9 +45,6 @@ No build automation exists. Run scripts from RStudio or via `Rscript` from the r
 `code/methods-notes.md` documents 20+ outstanding issues. The most consequential:
 
 - **2.5 (critical)**: Bootstrap reuses weights estimated on the full sample — SEs are understated. Fix requires re-estimating PS model on each bootstrap resample.
-- **1.4 (partially fixed)**: `cleaning-script.R` now starts `prof_codes` at `1`, but `weighting.R` still starts at `0` — creating a mismatch between linked and comparison samples in PS estimation.
-- **1.8**: `classify_meso()` and `classify_macro()` are duplicated across `cleaning-script.R` and `weighting.R` and have actively diverged (due to the partial 1.4 fix). Region mapping is also triplicated. Fix: extract to a shared `utils.R`.
-- **2.3**: ~~Son's occupation (`meso_son`) was a PS covariate~~ — **FIXED**, removed from the model.
 - **3.1**: Within-region weights are not renormalized before regional statistics are computed.
 
 Before modifying occupation classification logic, check both `cleaning-script.R` (lines 119–141) and `weighting.R` (lines 29–51) — they must stay in sync until issue 1.8 is resolved.

@@ -29,7 +29,58 @@ classify_macro = function(meso) {
 
 macro_order = c("farming", "manual", "nonmanual", "nilf")
 meso_order = c("farmworker", "farmer", "unskilled", "crafts", "nonmanual", "nilf")
-meso_order_alt = c("farmer", "unskilled", "crafts", "nonmanual", "nilf")
+
+# --- Modal occupation picker ---
+
+pick_modal_occ = function(df, aian_age, prefer_employed = TRUE, empstatd_tiebreak = FALSE) {
+  out = df |>
+    mutate(birthyr_son = 1940 - age_1940) |>
+    left_join(select(aian_age, pid, birth_median), by = "pid") |>
+    rename(birthyr_pop = birth_median) |>
+    select(-starts_with("age")) |>
+    filter(birthyr_son > birthyr_pop + 20) |>
+    select(pid, starts_with("occ1950_pop_"), birthyr_pop, birthyr_son) |>
+    pivot_longer(
+      cols = starts_with("occ1950_pop_"),
+      names_to = "year",
+      names_pattern = "occ1950_pop_(\\d{4})",
+      names_transform = list(year = as.integer),
+      values_to = "occ",
+      values_drop_na = TRUE) |>
+    group_by(pid, year) |>
+    summarise(
+      # Constant within (pid, year) — carried through, not aggregated
+      birthyr_pop = first(birthyr_pop),
+      birthyr_son = first(birthyr_son),
+      occ = {
+        pool <- if (prefer_employed && any(occ <= 970)) occ[occ <= 970] else occ
+        as.integer(names(which.max(table(pool))))
+      },
+      .groups = "drop") |>
+    mutate(implied_age    = ifelse(!is.na(birthyr_pop), year - birthyr_pop, NA_real_),
+           son_age_at_obs = year - birthyr_son) |>
+    group_by(pid) |>
+    mutate(
+      has_pref = prefer_employed & any(occ <= 970, na.rm = TRUE),
+      occ_used = if_else(has_pref & occ <= 970, occ,
+                         if_else(has_pref, NA_integer_, occ))) |>
+    filter(!is.na(occ_used),
+           is.na(implied_age) | implied_age <= 65) |>
+    add_count(pid, occ_used, name = "freq") |>
+    filter(freq == max(freq)) |>
+    mutate(has_empstatd = year %in% c(1910, 1930, 1940),
+           age_dist     = coalesce(abs(son_age_at_obs - 10), Inf))
+
+  if (empstatd_tiebreak)
+    out = arrange(out, pid, desc(has_empstatd), age_dist, year)
+  else
+    out = arrange(out, pid, age_dist, year)
+
+  out |>
+    slice_head(n = 1) |>
+    ungroup() |>
+    transmute(pid, occ = occ_used, year, birthyr_pop)
+}
 
 # --- Region mapping ---
 

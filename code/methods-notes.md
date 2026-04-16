@@ -129,23 +129,6 @@ Include in a regional table; probably not on the map.
 - *IM(t, i) curves by region*: still feasible with n > 1,200 for major origin
   categories; consider including in an appendix for completeness.
 
----
-
-### 2.3 d'(1) is not cross-regionally comparable on maps
-
-`d_prime_1` measures the distance between the son's marginal distribution and the
-region's own stationary distribution after one generation. Because the stationary
-distribution is endogenous to each region's P matrix, two regions with equal d'(1)
-may have completely different mobility regimes and completely different targets.
-Cross-regional comparison of d'(1) is comparing distances to different endpoints.
-
-**Fix**: Remove d'(1) from regional maps. Retain it in the global analysis (where
-there is a single P and a single stationary distribution) and in the cohort
-stationarity supplement. If a convergence scalar is needed for the regional maps,
-EM captures the same intuition (how much rank-switching occurs, net of structural
-change) without the reference-point problem.
-
----
 
 ## 3. Employment Classification (`cleaning-script.R`)
 

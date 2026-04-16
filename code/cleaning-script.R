@@ -87,59 +87,22 @@ aian_age = aian_clean |>
     spread_mad = median(abs(c_across(starts_with("birthyr")) - birth_median), na.rm = TRUE)) |>
   ungroup()
 
-modal_occ_pick = aian_clean |>
-  mutate(birthyr_son = 1940 - age_1940) |>
-  left_join(aian_age |> select(pid, birth_median), by = "pid") |>
-  rename(birthyr_pop = birth_median) |>
-  select(-starts_with("age")) |>
-  filter(birthyr_son > birthyr_pop + 20) |>
-  select(pid, starts_with("occ1950_pop_"), birthyr_pop, birthyr_son) |>
-  pivot_longer(
-    cols = starts_with("occ1950_pop_"),
-    names_to = "year",
-    names_pattern = "occ1950_pop_(\\d{4})",
-    names_transform = list(year = as.integer),
-    values_to = "occ",
-    values_drop_na = TRUE) |>
-  group_by(pid, year) |>
-  summarise(
-    birthyr_pop = dplyr::first(birthyr_pop),
-    birthyr_son = dplyr::first(birthyr_son),
-    occ = {
-      vals <- na.omit(occ)
-      if (length(vals) == 0) NA_integer_
-      else {
-        pool <- vals[vals <= 970]
-        if (length(pool) == 0) pool <- vals
-        tab  <- table(pool)
-        as.integer(names(tab)[which.max(tab)])
-      }
-    },
-    .groups = "drop") |>
-  mutate(implied_age = ifelse(!is.na(birthyr_pop), year - birthyr_pop, NA_real_),
-         son_age_at_obs = year - birthyr_son) |>
-  group_by(pid) |>
-  mutate(
-    has_pref = any(occ <= 970, na.rm = TRUE),
-    occ_used = if_else(has_pref & occ <= 970, occ,
-                       if_else(has_pref, NA_integer_, occ))) |>
-  filter(!is.na(occ_used),
-         is.na(implied_age) | implied_age <= 65) |>
-  add_count(pid, occ_used, name = "freq") |>
-  filter(freq == max(freq)) |>
-  mutate(age_dist = dplyr::coalesce(abs(son_age_at_obs - 10), Inf)) |>
-  arrange(pid, age_dist, year) |>
-  slice_head(n = 1) |>
-  ungroup() |>
-  transmute(pid,
-            occ_pop = occ_used,
-            birthyr_pop)
+modal_occ_pick = pick_modal_occ(aian_clean, aian_age) |>
+  rename(occ_pop = occ) |>
+  select(-year)
 
 cat("Fathers with recovered occupation:", nrow(modal_occ_pick),
     "of", n_distinct(aian_clean$pid), "unique fathers\n")
 
+modal_occ_pick_attach = pick_modal_occ(aian_clean, aian_age,
+                                        prefer_employed   = FALSE,
+                                        empstatd_tiebreak = TRUE) |>
+  rename(occ_pop_attach = occ, picked_year_attach = year) |>
+  select(-birthyr_pop)
+
 aian_merged = aian_clean |>
-  left_join(modal_occ_pick, by = c("pid")) |>
+  left_join(modal_occ_pick, by = "pid") |>
+  left_join(modal_occ_pick_attach, by = "pid") |>
   left_join(aian_age |> select(pid, birthyr_spread = spread, spread_mad), by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
   select(-pid, -starts_with("age"), -starts_with("occ1950_pop")) |>
@@ -148,21 +111,37 @@ aian_merged = aian_clean |>
   filter(is.na(spread_mad) | spread_mad <= 4) |>
   (\(x) { cat("After spread filter (MAD <= 4):", nrow(x), "father-son pairs\n"); x })() |>
   mutate(spread_flag = !is.na(spread_mad) & spread_mad > 2,
+         attachment_level_son = case_when(
+           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 == 0  ~ 1L,
+           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 <= 13 ~ 2L,
+           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 <= 26 ~ 3L,
+           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34)                       ~ 4L,
+           .default = NA_integer_),
+         attachment_level_pop = {
+           ep <- case_when(
+             picked_year_attach == 1910 ~ empstatd_pop_1910,
+             picked_year_attach == 1930 ~ empstatd_pop_1930,
+             picked_year_attach == 1940 ~ empstatd_pop_1940,
+             .default = NA_integer_
+           )
+           lf <- if_else(picked_year_attach == 1920, labforce_pop_1920, NA_integer_)
+           case_when(
+             occ_pop_attach <= 970 & ep %in% c(21,22,31,32,33,34) ~ 1L,
+             occ_pop_attach <= 970 & is.na(ep) & lf == 1          ~ 2L,
+             .default = NA_integer_
+           )
+         },
          meso_pop = classify_meso(occ_pop),
          macro_pop = classify_macro(meso_pop),
          meso_son = classify_meso(occ_son),
          macro_son = classify_macro(meso_son),
-         # Alternative classification of farmworkers
-         meso_pop_alt = classify_meso(occ_pop, split_farmer = FALSE),
-         macro_pop_alt = classify_macro(meso_pop_alt),
-         meso_son_alt = classify_meso(occ_son, split_farmer = FALSE),
-         macro_son_alt = classify_macro(meso_son_alt)) |>
+         # Attachment-matrix father classification (no occ <= 970 preference)
+         meso_pop_attach = classify_meso(occ_pop_attach),
+         macro_pop_attach = classify_macro(meso_pop_attach)) |>
   mutate(across(starts_with("macro_"),
                 ~ factor(.x, levels = macro_order, ordered = TRUE)),
-         across(starts_with("meso_") & !ends_with("_alt"),
-                ~ factor(.x, levels = meso_order, ordered = TRUE)),
-         across(starts_with("meso_") & ends_with("_alt"),
-                ~ factor(.x, levels = meso_order_alt, ordered = TRUE))) |>
+         across(starts_with("meso_"),
+                ~ factor(.x, levels = meso_order, ordered = TRUE))) |>
   mutate(
     lit_son = do.call(pmax, c(pick(starts_with("lit_19")), na.rm = TRUE)),
     lit_pop = do.call(pmax, c(pick(starts_with("lit_pop")), na.rm = TRUE))) |>
@@ -176,6 +155,9 @@ aian_merged = aian_clean |>
   relocate(birthyr_spread, .after = birthyr_pop) |>
   relocate(spread_mad, .after = birthyr_spread) |>
   relocate(spread_flag, .after = spread_mad) |>
+  relocate(attachment_level_son, .after = spread_flag) |>
+  relocate(attachment_level_pop, .after = attachment_level_son) |>
+  relocate(occ_pop_attach, picked_year_attach, .after = occ_pop) |>
   relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son_alt) |>
   relocate(lit_son, .after = educd_1940) |>

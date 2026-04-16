@@ -345,40 +345,31 @@ om_plot
 compute_mobility_stats = function(df) {
   df = df |> mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
 
-  p_upward = df |>
-    filter(macro_pop != "nonmanual") |>
-    mutate(count = (macro_son == "nonmanual") |
-             (macro_pop == "nilf" & macro_son != "nilf")) |>
-    summarise(tot = sum(w_atc_norm), up = sum(count * w_atc_norm)) |>
-    mutate(prop = up / tot) |>
-    select(prop)
+  P      = p_matrix(df, macro_pop, macro_son, weighted = TRUE)
+  pi0    = pi_0(df, macro_pop)
+  pistar = pi_star(P)
 
-  p_downward = df |>
-    filter(macro_pop == "nonmanual" | meso_pop == "farmer" | meso_pop == "crafts") |>
-    mutate(count = (macro_pop == "nonmanual" & macro_son != "nonmanual") |
-             (meso_pop == "farmer" & meso_son %in% c("unskilled", "farmworker", "nilf")) |
-             (meso_pop == "crafts" & meso_son %in% c("unskilled", "farmworker", "nilf"))) |>
-    summarise(tot = sum(w_atc_norm), down = sum(count * w_atc_norm)) |>
-    mutate(prop = down / tot) |>
-    select(prop)
+  om_val = om(P, pi0, t = 0)
+  sm_val = sum(abs(as.numeric(pi0) - as.numeric(pistar))) / 2
+  em_val = om_val - sm_val
 
-  d1 = d_prime(df, macro_pop, macro_son, t = 1)
+  # Farming-family decomposition
+  farming_rows = df |> filter(macro_pop == "farming")
+  p_manual_given_farming = weighted.mean(
+    farming_rows$macro_son == "manual", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_farming_given_farming = weighted.mean(
+    farming_rows$macro_son == "farming", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_nilf_given_farming = weighted.mean(
+    farming_rows$macro_son == "nilf", farming_rows$w_atc_norm, na.rm = TRUE)
 
-  P = p_matrix(df, macro_pop, macro_son)
-  verify_ergodic(P, paste("region:", unique(df$region)))
-  pi0 = pi_0(df, macro_pop)
-
-  P_unweighted = p_matrix_unweighted(df, macro_pop, macro_son)
-  pi0_unweighted = pi_0_unweighted(df, macro_pop)
-
-  om_weighted = om(P, pi0, t = 0)
-  om_unweighted = om(P_unweighted, pi0_unweighted, t = 0)
-
-  tibble(p_upward = round(p_upward$prop, 2),
-         p_downward = round(p_downward$prop, 2),
-         d_prime_1 = round(exp(d1), 2),
-         om_1 = round(om_weighted, 2),
-         om_1_unweighted = round(om_unweighted, 2))
+  tibble(
+    sm                   = round(sm_val, 3),
+    em                   = round(em_val, 3),
+    om                   = round(om_val, 3),
+    p_manual_fm_farming  = round(p_manual_given_farming, 3),
+    p_farming_fm_farming = round(p_farming_given_farming, 3),
+    p_nilf_fm_farming    = round(p_nilf_given_farming, 3)
+  )
 }
 
 results_region = data |>
@@ -423,18 +414,13 @@ centroids = st_centroid(regions_sf) |>
 
 ## Regional maps ----
 
-om_1_plot = plot_region_map(states_sf, regions_sf, centroids,
-                            om_1, om_1,
-                            "OM(0) by Region")
+sm_plot = plot_region_map(states_sf, regions_sf, centroids,
+                            sm, sm,
+                            "Structural Mobility by Region")
 
-d_1_prime_plot = plot_region_map(states_sf, regions_sf, centroids,
-                                d_prime_1, d_prime_1,
-                                "d'(1) by Region")
-
-upward_downward_plot = plot_region_map(states_sf, regions_sf, centroids,
-                                      round(p_upward / p_downward, 2),
-                                      round(p_upward / p_downward, 2),
-                                      "P(upward) / P(downward) by Region")
+em_plot = plot_region_map(states_sf, regions_sf, centroids,
+                                em, em,
+                                "Exchange Mobility by Region")
 
 ################################################################################
 #################### 7. SUPPLEMENTARY: COHORT STATIONARITY ####################

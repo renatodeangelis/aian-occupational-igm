@@ -18,9 +18,7 @@ aian_full = read_csv(
   mutate(birthyr_son = 1940 - age,
          meso_son = classify_meso(occ1950),
          macro_son = classify_macro(meso_son),
-         meso_son_alt = classify_meso(occ1950, split_farmer = FALSE),
-         macro_son_alt = classify_macro(meso_son_alt),
-         region = assign_region(statefip),
+region = assign_region(statefip),
          education = classify_education(educd)) |>
   rename(statefip_1940 = statefip, urban_1940 = urban)
 
