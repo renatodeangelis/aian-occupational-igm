@@ -132,12 +132,14 @@ compute_weights = function(df_linked, df_full) {
   model = glm(linked ~ cohort * region + education * region + statefip_1940 + urban_1940,
               data = comb, family = binomial)
 
-  comb_full = dplyr::filter(comb, linked == 0)
+  comb_linked = dplyr::filter(comb, linked == 1)
+  comb_full   = dplyr::filter(comb, linked == 0)
 
   list(
-    data = df_linked |>
+    data = comb_linked |>
+      dplyr::select(-linked) |>
       dplyr::mutate(
-        p_hat      = predict(model, newdata = df_linked, type = "response"),
+        p_hat      = predict(model, newdata = comb_linked, type = "response"),
         w_atc      = (1 - p_hat) / p_hat,
         w_atc_norm = w_atc * dplyr::n() / sum(w_atc)
       ),

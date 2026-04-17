@@ -1,6 +1,5 @@
 library(dplyr)
 library(readr)
-library(tidyr)
 library(cobalt)
 library(ggplot2)
 
@@ -16,9 +15,7 @@ aian_full = read_csv(
   filter(age >= 20 & age < 45,
          school == 1) |>
   mutate(birthyr_son = 1940 - age,
-         meso_son = classify_meso(occ1950),
-         macro_son = classify_macro(meso_son),
-region = assign_region(statefip),
+         region = assign_region(statefip),
          education = classify_education(educd)) |>
   rename(statefip_1940 = statefip, urban_1940 = urban)
 
@@ -82,24 +79,35 @@ cat("ESS after trimming:", round(ess_trimmed, 1), "\n")
 
 # --- 2.6 fix: Covariate balance diagnostics ---
 aian_comb_bal = aian_comb |>
-  left_join(aian_ps |> select(histid_1940, w_atc_norm), by = "histid_1940") |>
-  mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm))
+  mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm)) |>
+  left_join(aian_ps |> select(histid_1940, w_trim_norm), by = "histid_1940") |>
+  mutate(w_trim_norm = if_else(linked == 0, 1, w_trim_norm))
 
+# --- Balance: untrimmed weights ---
 bt = bal.tab(linked ~ cohort + region + education + urban_1940,
              data = aian_comb_bal, weights = "w_atc_norm",
              method = "weighting", estimand = "ATC",
              un = TRUE)
-cat("\n--- Covariate balance (substantive variables) ---\n")
+cat("\n--- Covariate balance (untrimmed weights) ---\n")
 print(bt)
 dir.create("output", showWarnings = FALSE)
 write_csv(as.data.frame(bt$Balance), "output/balance_table.csv")
 
+# --- Balance: trimmed weights (what goes into analysis) ---
+bt_trim = bal.tab(linked ~ cohort + region + education + urban_1940,
+                  data = aian_comb_bal, weights = "w_trim_norm",
+                  method = "weighting", estimand = "ATC",
+                  un = FALSE)
+cat("\n--- Covariate balance (trimmed weights) ---\n")
+print(bt_trim)
+write_csv(as.data.frame(bt_trim$Balance), "output/balance_table_trimmed.csv")
+
 bt_state = bal.tab(linked ~ statefip_1940,
-                   data = aian_comb_bal, weights = "w_atc_norm",
+                   data = aian_comb_bal, weights = "w_trim_norm",
                    method = "weighting", estimand = "ATC",
                    un = TRUE)
 state_smds = bt_state$Balance$Diff.Adj
-cat("\n--- State balance summary ---\n")
+cat("\n--- State balance summary (trimmed weights) ---\n")
 cat("State balance — max |SMD|:", round(max(abs(state_smds)), 3),
     " mean |SMD|:", round(mean(abs(state_smds)), 3), "\n")
 if (any(abs(state_smds) > 0.2)) {
