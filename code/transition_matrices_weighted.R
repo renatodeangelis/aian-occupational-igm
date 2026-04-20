@@ -18,6 +18,8 @@ source("research/projects/aian-igm/code/utils.R")
 data = read_csv("data/aian_weighted.csv") |>
   mutate(w_atc_norm = w_trim_norm)
 
+aian_full = readRDS("data/aian_full.rds")
+
 macro_levels = unique(data$macro_pop)
 meso_levels = unique(data$meso_pop)
 
@@ -220,8 +222,12 @@ desc_educd    = weighted_prop_table(data, education)
 ts = 0:4
 
 # Transition matrices with bootstrap CIs
-p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son, R = 1000, conf = 0.95, .seed = 123)
-p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son, R = 1000, conf = 0.95, .seed = 123)
+p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
+                               df_linked = data, df_full = aian_full,
+                               R = 500, .seed = 123)
+p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son,
+                               df_linked = data, df_full = aian_full,
+                               R = 500, .seed = 123)
 
 # Initial and stationary distributions
 pi0_vec_macro = pi_0(data, macro_pop)
@@ -252,12 +258,22 @@ im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed 
                                             "Not working")))
 
 # Overall mobility bootstrap
-macro_om = mobility_curve_with_boot(data, macro_pop, macro_son, ts = 1:6)
-meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son, ts = 1:6)
+macro_om = mobility_curve_with_boot(data, macro_pop, macro_son,
+                                     df_linked = data, df_full = aian_full,
+                                     ts = 1:6)
+meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son,
+                                     df_linked = data, df_full = aian_full,
+                                     ts = 1:6)
 
+# OM is no longer returned by mobility_curve_with_boot (EM/SM only).
+# lo/hi are derived from SE for the ribbon; 1.96 gives approximate 95% bands.
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
-  mutate(level = factor(level, labels = c("meso", "macro"))) |>
-  filter(measure != "SM")
+  mutate(
+    level = factor(level, labels = c("meso", "macro")),
+    lo    = est - 1.96 * se,
+    hi    = est + 1.96 * se
+  ) |>
+  filter(measure == "EM")
 
 ################################################################################
 ############################# 5. PLOTTING ######################################
@@ -314,11 +330,11 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
   scale_x_continuous(breaks = 0:6) +
   scale_y_continuous(breaks = seq(0, 0.7, 0.1)) +
   scale_linetype_manual(name = "Measure",
-                        labels = c("Exchange Mobility", "Overall Mobility"),
-                        values = c(EM = "dashed", OM = "solid")) +
+                        labels = c("Exchange Mobility"),
+                        values = c(EM = "dashed")) +
   scale_shape_manual(name = "Measure",
-                     labels = c("Exchange Mobility", "Overall Mobility"),
-                     values = c(EM = 17, OM = 16)) +
+                     labels = c("Exchange Mobility"),
+                     values = c(EM = 17)) +
   scale_fill_manual(name = "Level",
                     labels = c("Meso (6 categories)", "Macro (4 categories)"),
                     values = c("meso" = "#009E73", "macro" = "#D55E00")) +

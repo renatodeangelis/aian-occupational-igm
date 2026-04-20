@@ -147,6 +147,39 @@ compute_weights = function(df_linked, df_full) {
   )
 }
 
+# --- Top-1% weight trimmer ---
+#
+# WHY THIS EXISTS:
+#   compute_weights() returns raw ATC weights (w_atc) and a naive normalisation
+#   (w_atc_norm). The main analysis pipeline in weighting.R additionally trims
+#   extreme weights at the 99th percentile before renormalising. Any bootstrap
+#   that re-estimates weights on each resample must apply the same trim, or the
+#   distribution of bootstrap draws will be broader than the estimator it is
+#   approximating — inflating SEs.
+#
+# DESIGN CHOICES:
+#   - Trim is applied to w_atc (raw, pre-normalisation), matching weighting.R
+#     lines 69-75. Trimming w_atc_norm instead would shift the threshold each
+#     time the sample size changes, making resamples non-comparable.
+#   - The 99th-percentile threshold is recomputed per call (i.e., per resample)
+#     rather than being fixed to the full-sample threshold. This is correct:
+#     each draw has its own weight distribution, and the trim should be
+#     calibrated to that draw's distribution.
+#   - The function overwrites w_atc_norm in place so downstream functions
+#     (p_matrix, pi_0) pick up trimmed weights without any argument changes.
+#
+# ASSUMPTION:
+#   df has columns w_atc and w_atc_norm — i.e., it is compute_weights()$data.
+#   Calling this on any other data frame will silently produce wrong results.
+
+trim_weights_top1 = function(df) {
+  thresh = quantile(df$w_atc, 0.99, na.rm = TRUE)
+  dplyr::mutate(df,
+    w_atc      = pmin(w_atc, thresh),    # cap extremes; do not remove rows
+    w_atc_norm = w_atc * dplyr::n() / sum(w_atc)   # renormalise after cap
+  )
+}
+
 # --- Transition matrix and distribution functions ---
 
 pi_0 = function(data, level) {
@@ -485,39 +518,78 @@ boot_measures_by_t = function(data, level_dad, level_son,
   }) |> dplyr::mutate(dt_t = est * t)
 }
 
+# --- Bootstrap SE for transition matrix cells ---
+#
+# WHY THIS REPLACES THE OLD boot_pmatrix_ci:
+#   The previous version resampled the pre-weighted data object and reused fixed
+#   weights. This understates SEs because propensity score estimation uncertainty
+#   is not propagated. The fix is to re-run compute_weights() on every resample,
+#   then trim, so each draw reflects the full estimator including weight
+#   uncertainty.
+#
+# SCOPE:
+#   Returns standard errors only — not confidence intervals. SEs are the only
+#   bootstrap output used for the transition matrix tables. Percentile CIs would
+#   require R ≥ 1000 and are not needed here; sd() across draws converges faster.
+#
+# INPUTS:
+#   data      — the loaded analysis dataset (aian_weighted.csv). Used only for
+#               the occupational classification columns (macro_pop, macro_son,
+#               etc.); existing weight columns are overwritten by each call to
+#               compute_weights().
+#   df_linked — same object as data is fine. compute_weights() only reads
+#               birthyr_son, region, education, statefip_1940, urban_1940 for
+#               the PS model; all other columns pass through unchanged.
+#   df_full   — the full AIAN extract (aian_full.rds). Held fixed across all
+#               draws. Resampling df_full as well would be defensible but is
+#               not standard practice for ATC weighting where df_full represents
+#               a (near-)population target.
+#
+# ASSUMPTIONS:
+#   1. df_linked has region and education columns (added by weighting.R before
+#      compute_weights() was called). Passing aian_weighted.csv satisfies this.
+#   2. Occasional bootstrap resamples may produce sparse cohort×region cells,
+#      causing the GLM to fail or return extreme predictions. These draws are
+#      not guarded against here; consider wrapping boot_once() in tryCatch()
+#      if convergence warnings appear in practice.
+#   3. R = 500 is sufficient for stable SE estimation. For the final paper,
+#      bump to 1000 and verify SEs change by < 5%.
+
 boot_pmatrix_ci = function(
     data, level_dad, level_son,
-    R = 1000, conf = 0.95, .seed = NULL) {
-  if (!is.null(.seed)) set.seed(.seed)
+    df_linked, df_full,
+    R = 500, .seed = NULL) {
 
+  if (!is.null(.seed)) set.seed(.seed)
   dad_sym = rlang::ensym(level_dad)
   son_sym = rlang::ensym(level_son)
+  N = nrow(df_linked)
 
-  P_hat = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
+  # Point estimate: run the full pipeline (weight → trim → P) on the complete
+  # linked sample, so the point estimate is on the same pipeline as each draw.
+  w_full = compute_weights(df_linked, df_full)
+  d_full = trim_weights_top1(w_full$data)
+  P_hat  = p_matrix(d_full, !!dad_sym, !!son_sym, matrix = TRUE)
   rnames = rownames(P_hat); cnames = colnames(P_hat)
   nR = nrow(P_hat); nC = ncol(P_hat)
 
   boot_once = function() {
-    idx = sample.int(nrow(data), nrow(data), replace = TRUE)
-    d_b = data[idx, , drop = FALSE]
+    idx = sample.int(N, N, replace = TRUE)
+    w_b = compute_weights(df_linked[idx, ], df_full)   # re-estimate PS on draw
+    d_b = trim_weights_top1(w_b$data)                  # trim this draw's weights
     p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
   }
 
   boots = replicate(R, boot_once(), simplify = FALSE)
-  arr   = simplify2array(boots)
+  arr   = simplify2array(boots)    # nR × nC × R array
 
-  alpha = 1 - conf
   se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
-  q_lo   = apply(arr, c(1, 2), quantile, probs = alpha/2, na.rm = TRUE, names = FALSE)
-  q_hi   = apply(arr, c(1, 2), quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
 
   tibble::tibble(
     !!dad_sym := rep(rnames, times = nC),
     !!son_sym := rep(cnames, each  = nR),
     est = as.vector(P_hat),
-    se  = as.vector(se_mat),
-    lo  = as.vector(q_lo),
-    hi  = as.vector(q_hi)
+    se  = as.vector(se_mat)
   )
 }
 
@@ -572,73 +644,92 @@ boot_im_by_t = function(data, level_dad, level_son, ts = 0:4, R = 1000, .seed = 
   dplyr::left_join(point_by_t, summ, by = c("t", "origin"))
 }
 
-mobility_curve_with_boot = function(data, level_dad, level_son, ts = 1:5,
-                                     R = 1000, .seed = NULL, conf = 0.95) {
+# --- Bootstrap SE for EM/SM mobility curves ---
+#
+# WHY THIS REPLACES THE OLD mobility_curve_with_boot:
+#   Same root problem as boot_pmatrix_ci: the previous version resampled the
+#   pre-weighted dataset without re-estimating propensity scores, understating
+#   SEs — especially for EM and SM, which depend on the marginal distributions
+#   pi_0 and pi_star and are therefore sensitive to weight variance.
+#
+# SCOPE:
+#   Returns SEs for EM and SM only. OM is excluded: the paper's analytical
+#   contribution is the EM/SM decomposition, and OM is recoverable as EM + SM
+#   at the caller level if needed. Dropping OM halves the output width and
+#   avoids implying OM has independent inferential content here.
+#   No CIs are returned — same reasoning as boot_pmatrix_ci.
+#
+# INPUTS:
+#   data, df_linked, df_full — same roles as in boot_pmatrix_ci (see above).
+#
+# DESIGN CHOICES:
+#   - compute_em_sm() is a closure that captures dad_sym/son_sym. It is defined
+#     inside the outer function so the bootstrap loop can call it without
+#     passing symbols explicitly.
+#   - pi_0() uses <<- to look up macro_levels/meso_levels in the calling
+#     environment. The closure keeps those lookups in scope.
+#   - The pre-generated index matrix (inds_mat) from the previous version is
+#     replaced with a simpler replicate() loop. The index matrix was a
+#     micro-optimisation that added complexity without measurable speed gain
+#     at R = 500.
+#
+# ASSUMPTIONS (shared with boot_pmatrix_ci):
+#   1. df_linked already has region and education columns.
+#   2. Sparse resample GLM failures are not guarded against; monitor for
+#      convergence warnings on the first run.
+#   3. R = 500 is sufficient for SE estimation.
+
+mobility_curve_with_boot = function(
+    data, level_dad, level_son,
+    df_linked, df_full,
+    ts = 1:5, R = 500, .seed = NULL) {
+
   if (!is.null(.seed)) set.seed(.seed)
-  alpha = 1 - conf
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
+  N = nrow(df_linked)
 
-  P = p_matrix(data, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-  pi0 = pi_0(data, {{ level_dad }})
-  pi0_num = as.numeric(pi0)
+  # Inner stat function: given a weighted data frame, return EM and SM for
+  # each t. Called once for the point estimate and once per bootstrap draw.
+  compute_em_sm = function(df) {
+    P   = p_matrix(df, !!dad_sym, !!son_sym, matrix = TRUE)
+    pi0 = as.numeric(pi_0(df, !!dad_sym))
 
-  compute_series_from_P = function(Pmat, pi0_vec, ts_vec) {
-    mu = as.numeric(pi0_vec)
-    purrr::map_dfr(ts_vec, function(tt) {
-      if (tt > 0) mu <<- as.numeric(mu %*% Pmat)
-      mu1 = as.numeric(mu %*% Pmat)
-      OMv = 1 - sum(mu * diag(Pmat))
-      SMv = tv_norm(mu, mu1)
-      tibble::tibble(t = tt, OM = OMv, SM = SMv, EM = OMv - SMv)
+    purrr::map_dfr(ts, function(tt) {
+      # mu is the marginal distribution of fathers' occupations at generation t.
+      # At t = 0 it equals pi_0; for t > 0 it advances one step through P.
+      mu  = as.numeric(pi0 %*% (if (tt == 0) diag(nrow(P)) else P %^% tt))
+      mu1 = as.numeric(mu %*% P)           # one step forward from mu
+      om_v = 1 - sum(mu * diag(P))         # overall mobility at t
+      sm_v = tv_norm(mu, mu1)              # structural component
+      tibble::tibble(t = tt, EM = om_v - sm_v, SM = sm_v)
     })
   }
 
-  point_series = compute_series_from_P(P, pi0_num, ts)
+  # Point estimate: run full pipeline on complete linked sample.
+  w_full   = compute_weights(df_linked, df_full)
+  d_full   = trim_weights_top1(w_full$data)
+  point_df = compute_em_sm(d_full)
 
-  N = nrow(data)
-  inds_mat = matrix(sample.int(N, N * R, replace = TRUE), nrow = N, ncol = R)
-
-  worker_draw = function(j) {
-    idx = inds_mat[, j]
-    dsub = data[idx, , drop = FALSE]
-
-    P_b = p_matrix(dsub, {{ level_dad }}, {{ level_son }}, matrix = TRUE)
-    pi0_b = pi_0(dsub, {{ level_dad }})
-
-    if (!is.null(names(pi0_b)) && !is.null(rownames(P_b)) && !all(names(pi0_b) == rownames(P_b))) {
-      if (all(names(pi0_b) %in% rownames(P_b))) {
-        pi0_b = pi0_b[rownames(P_b)]
-      } else {
-        pi0_b = as.numeric(pi0_b)
-      }
-    }
-
-    out = compute_series_from_P(P_b, pi0_b, ts)
-    as.matrix(out |> dplyr::select(OM, SM, EM))
+  boot_once = function() {
+    idx = sample.int(N, N, replace = TRUE)
+    w_b = compute_weights(df_linked[idx, ], df_full)
+    d_b = trim_weights_top1(w_b$data)
+    as.matrix(compute_em_sm(d_b)[, c("EM", "SM")])   # nT × 2
   }
 
-  boots_list = lapply(seq_len(R), worker_draw)
+  boots = replicate(R, boot_once(), simplify = FALSE)
+  arr   = simplify2array(boots)   # nT × 2 × R
 
-  boots_array = simplify2array(boots_list)
-
-  nT = length(ts)
-  measures = c("OM", "SM", "EM")
-  est_mat = as.matrix(point_series[, measures])
-
-  summarised = purrr::map_dfr(seq_len(nT), function(i_t) {
-    draws_mat = matrix(boots_array[i_t, , ], nrow = 3, ncol = R)
-
-    purrr::map_dfr(seq_len(3), function(m_idx) {
-      v = draws_mat[m_idx, ]
-      tibble::tibble(
-        t       = ts[i_t],
-        measure = measures[m_idx],
-        est     = est_mat[i_t, m_idx],
-        se      = sd(v, na.rm = TRUE),
-        lo      = quantile(v, probs = alpha/2, na.rm = TRUE, names = FALSE),
-        hi      = quantile(v, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
-      )
-    })
+  purrr::map_dfr(seq_along(ts), function(i_t) {
+    # draws is a 2 × R matrix; rows correspond to EM and SM respectively.
+    draws = arr[i_t, , , drop = FALSE]
+    draws = matrix(draws, nrow = 2, ncol = R)
+    tibble::tibble(
+      t       = ts[i_t],
+      measure = c("EM", "SM"),
+      est     = as.numeric(point_df[i_t, c("EM", "SM")]),
+      se      = apply(draws, 1, sd, na.rm = TRUE)
+    )
   })
-
-  summarised
 }
