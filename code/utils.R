@@ -15,7 +15,7 @@ classify_meso = function(occ, split_farmer = TRUE) {
     occ %in% nonman_codes ~ "nonmanual",
     occ %in% 500:594 | occ %in% crafts_codes ~ "crafts",
     occ %in% 595:970 & !(occ %in% crafts_codes) & !(split_farmer & occ %in% 810:840) ~ "unskilled",
-    occ > 970 ~ "nilf"
+    occ > 970 ~ "nonemp"
   )
 }
 
@@ -24,11 +24,11 @@ classify_macro = function(meso) {
     meso %in% c("farmer", "farmworker") ~ "farming",
     meso == "nonmanual" ~ "nonmanual",
     meso %in% c("crafts", "unskilled") ~ "manual",
-    meso == "nilf" ~ "nilf")
+    meso == "nonemp" ~ "nonemp")
 }
 
-macro_order = c("farming", "manual", "nonmanual", "nilf")
-meso_order = c("farmworker", "farmer", "unskilled", "crafts", "nonmanual", "nilf")
+macro_order = c("farming", "manual", "nonmanual", "nonemp")
+meso_order = c("farmworker", "farmer", "unskilled", "crafts", "nonmanual", "nonemp")
 
 # --- Modal occupation picker ---
 

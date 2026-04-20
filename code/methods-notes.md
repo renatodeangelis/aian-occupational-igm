@@ -94,7 +94,7 @@ meso and macro categories asymmetrically. The ratio should be dropped entirely.
 
 **Recommended replacement: five statistics at the macro level.**
 
-Use macro categories (farming, manual, nonmanual, nilf) for all regional map
+Use macro categories (farming, manual, nonmanual, nonemp) for all regional map
 statistics. Reserve meso categories for the global transition matrix heatmaps and
 IM curves, where the richer classification adds value without the cross-region
 comparability problem.
@@ -107,14 +107,14 @@ The five regional statistics, and their logic:
 | **EM** (exchange mobility) | Share of observed movement representing genuine rank-switching, net of structural change. EM and SM together decompose OM: if EM is near zero and SM is high, the paper's argument is that observed mobility is forced rather than achieved. |
 | **P(son = manual \| father = farming)** | The proletarianization rate: farming families whose sons ended up in manual wage labor. The headline cell for the paper's structural narrative. Well-estimated with n > 1,200. |
 | **P(son = farming \| father = farming)** | Farming persistence. Regional variation in this cell maps onto variation in land loss intensity under allotment. Paired with the preceding statistic, it shows what happened to farming families: some reproduced, most proletarianized. |
-| **P(son = nilf \| father = farming)** | Labor force exit from the farming sector. Provides the third branch of the farming-family story: exit into nonemployment rather than wage labor. |
+| **P(son = nonemp \| father = farming)** | Labor force exit from the farming sector. Provides the third branch of the farming-family story: exit into nonemployment rather than wage labor. |
 
 Statistics 3–5 together give a complete decomposition of farming-family outcomes
 across regions. Regional variation in their relative magnitudes is the core empirical
 contribution of the regional analysis.
 
-**Honorable mention**: P(son ≠ nilf | father = nilf) — exit from nonemployment — is
-well-defined and has adequate n, but covaries strongly with the nilf exit rate above.
+**Honorable mention**: P(son ≠ nonemp | father = nonemp) — exit from nonemployment — is
+well-defined and has adequate n, but covaries strongly with the nonemp exit rate above.
 Include in a regional table; probably not on the map.
 
 **Excluded statistics and reasons**:
@@ -141,7 +141,7 @@ Four variables jointly bear on son's employment classification. Coding for 1940:
 | `labforce_1940` | 1 = not in labor force; 2 = in labor force |
 | `wkswork1_1940` | weeks worked in **prior year** (1939), 0–52 |
 | `empstatd_1940` | 10 = at work; 11 = has job, not at work; 12 = has job, not at work (emergency); 21 = seeking work (unemployed) |
-| `occ_son` (occ1950_1940) | occupation at enumeration (April 1940); > 970 = nilf/unemp |
+| `occ_son` (occ1950_1940) | occupation at enumeration (April 1940); > 970 = nonemp/unemp |
 
 Note: `wkswork1` measures 1939 activity; `occ` and `empstatd` measure April 1940 status.
 These are different points in time and can legitimately conflict.
@@ -155,10 +155,10 @@ a cruder summary; `empstatd` is more informative where they differ.
 
 `classify_meso(occ_son)` in `utils.R` is purely occ-first:
 - `occ <= 970` → occupation category (farmer, farmworker, nonmanual, crafts, unskilled)
-- `occ > 970` → nilf
+- `occ > 970` → nonemp
 
 `labforce_1940`, `wkswork1_1940`, and `empstatd_1940` are carried through to
-`aian_merged.csv` but play no role in classification. `nilf` and `unemp` (occ 980–998)
+`aian_merged.csv` but play no role in classification. `nonemp` and `unemp` (occ 980–998)
 are collapsed into a single category — intentional, as non-employment is kept as a
 substantively meaningful state for this population.
 
@@ -176,9 +176,9 @@ conflict.
 | Pattern | n | Classification |
 |---|---|---|
 | in LF + valid occ + >0 wks | ~8,778 | Employ by occ |
-| not in LF + occ > 970 + 0 wks | ~1,045 | nilf |
-| in LF + occ 980–998 + 0 wks | 226 | nilf (collapsed) |
-| all occ > 970, any LF/wks | ~1,583 | nilf |
+| not in LF + occ > 970 + 0 wks | ~1,045 | nonemp |
+| in LF + occ 980–998 + 0 wks | 226 | nonemp (collapsed) |
+| all occ > 970, any LF/wks | ~1,583 | nonemp |
 
 **Gray areas and recommendations:**
 
@@ -188,16 +188,16 @@ conflict.
 | in LF + valid occ + 0 wks, empstatd 21 (seeking work) | 346 | Classify by occ (usual/last occ) — consistent with occ-first rule | Medium — see note |
 | not in LF + valid occ + >0 wks | 212 | Classify by occ | Medium |
 | not in LF + valid occ + 0 wks | 104 | Classify by occ | Low — most uncertain case |
-| in LF + occ=999 + 0 wks | 86 | nilf | High |
-| in LF + occ=999 + >0 wks | 50 | nilf (can't assign category) | High |
-| not in LF + occ=999 + >0 wks | 109 | nilf (current status) | Medium |
+| in LF + occ=999 + 0 wks | 86 | nonemp | High |
+| in LF + occ=999 + >0 wks | 50 | nonemp (can't assign category) | High |
+| not in LF + occ=999 + >0 wks | 109 | nonemp (current status) | Medium |
 
 **Note on empstatd=21 (346 seeking work, valid occ, 0 weeks):** These are currently
 unemployed men whose occupation code reflects usual/last occupation. Classifying them
 by occ treats occupational identity as persistent through unemployment spells, which
 is the standard assumption in occupational mobility research. The alternative — sending
-them to nilf — would mean unemployment and true non-employment are treated identically,
-which is arguably a greater distortion given that `nilf` is intended as a meaningful
+them to nonemp — would mean unemployment and true non-employment are treated identically,
+which is arguably a greater distortion given that `nonemp` is intended as a meaningful
 category here. However, this group is a candidate for the `wkswork_flag` robustness
 check (see 3.5).
 
@@ -220,11 +220,11 @@ group without changing the primary classification. The 104 `not in LF + valid oc
 ### 3.5 Two-matrix proposal (occupational identity vs. labor market attachment)
 
 **Concept:** Build two macro-level transition matrices using the same categories
-(farming / manual / nonmanual / nilf):
+(farming / manual / nonmanual / nonemp):
 
 - **Identity matrix** (current): occ-first, as implemented.
 - **Attachment matrix**: men with a valid occ code but no labor market activity
-  (best candidate rule: `empstatd == 21 & wkswork1 == 0`) reclassified to nilf.
+  (best candidate rule: `empstatd == 21 & wkswork1 == 0`) reclassified to nonemp.
   Applied symmetrically to fathers and sons.
 
 Framing: not a robustness check, but a secondary analysis examining whether occupational
@@ -241,14 +241,14 @@ inconsistent and occupational identity may not have reflected active employment.
 
 2. **Father-side rule:** use `wkswork1` from the same census year as the picked
    occupation (`picked_year`, currently dropped from `modal_occ_pick` — would need
-   to be retained). Apply: valid occ + wkswork1 = 0 in that year → nilf in attachment
+   to be retained). Apply: valid occ + wkswork1 = 0 in that year → nonemp in attachment
    matrix. `empstatd` equivalent may not be consistently available for fathers across
    census years; the father rule is therefore blunter than the son rule.
 
 3. **Gate on empirical result:** implement both matrices and compare before committing
    to framing. The contested cases are ~10% of the sample and concentrated in the
    bottom categories. If the matrices are nearly identical, drop the comparison.
-   If they differ in the nilf row/column in ways that speak to economic marginalization,
+   If they differ in the nonemp row/column in ways that speak to economic marginalization,
    develop the framing.
 
 **Key risks:**
@@ -287,7 +287,7 @@ not a structural model.
 2. EM/SM decomposition — the main analytical contribution; the ratio SM/(SM+EM) is
    the paper's headline finding
 3. Regional analysis: five statistics (SM, EM, P(manual|farming), P(farming|farming),
-   P(nilf|farming)) as maps and a regional table
+   P(nonemp|farming)) as maps and a regional table
 4. Cohort stationarity results — brief table, not a supplement
 
 **Appendix:**
@@ -392,8 +392,8 @@ compute_mobility_stats = function(df) {
     farming_rows$macro_son == "manual", farming_rows$w_atc_norm, na.rm = TRUE)
   p_farming_given_farming = weighted.mean(
     farming_rows$macro_son == "farming", farming_rows$w_atc_norm, na.rm = TRUE)
-  p_nilf_given_farming = weighted.mean(
-    farming_rows$macro_son == "nilf", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_nonemp_given_farming = weighted.mean(
+    farming_rows$macro_son == "nonemp", farming_rows$w_atc_norm, na.rm = TRUE)
 
   tibble(
     sm                   = round(sm_val, 3),
@@ -401,12 +401,12 @@ compute_mobility_stats = function(df) {
     om                   = round(om_val, 3),
     p_manual_fm_farming  = round(p_manual_given_farming, 3),
     p_farming_fm_farming = round(p_farming_given_farming, 3),
-    p_nilf_fm_farming    = round(p_nilf_given_farming, 3)
+    p_nonemp_fm_farming    = round(p_nonemp_given_farming, 3)
   )
 }
 ```
 
-Note: `p_manual_fm_farming + p_farming_fm_farming + p_nilf_fm_farming + p_nonmanual_fm_farming = 1`
+Note: `p_manual_fm_farming + p_farming_fm_farming + p_nonemp_fm_farming + p_nonmanual_fm_farming = 1`
 by construction; the three statistics above plus the (small) nonmanual rate fully
 decompose farming-father outcomes.
 
@@ -422,7 +422,7 @@ formatted table for inclusion in the main text, not just `cat()` output.
 
 The 20–44 age range for sons is retained as the main analysis. Three reasons:
 
-1. The dominant occupation categories (farmer, farmworker, unskilled, nilf) are
+1. The dominant occupation categories (farmer, farmworker, unskilled, nonemp) are
    not subject to the early-career instability that motivates age restrictions in
    white-collar samples. A 22-year-old AIAN farmworker in 1940 is in a stable
    occupational category, not a career placeholder.
@@ -465,8 +465,8 @@ where observations are lost.
 3. Check: is MAD ≤ 4 dropping more or fewer than the old range ≤ 10? If
    substantially more, adjust threshold
 4. Spot check: `table(aian_merged$meso_pop, aian_merged$meso_son)` for plausibility
-5. Bonus if time: `table(aian_merged$occ_son[aian_merged$meso_son == "nilf"])` to
-   assess occ == 999 contamination in the nilf row (see issue 3.2)
+5. Bonus if time: `table(aian_merged$occ_son[aian_merged$meso_son == "nonemp"])` to
+   assess occ == 999 contamination in the nonemp row (see issue 3.2)
 
 If cleaning looks clean, run `source("code/weighting.R")`.
 
@@ -481,7 +481,7 @@ After implementing, verify:
 - `sm + em ≈ om` for each region
 - Three conditional probabilities sum to < 1 (nonmanual is the fourth branch)
 - `results_region` carries: `sm`, `em`, `om`, `p_manual_fm_farming`,
-  `p_farming_fm_farming`, `p_nilf_fm_farming`
+  `p_farming_fm_farming`, `p_nonemp_fm_farming`
 
 ---
 
@@ -529,7 +529,7 @@ show: cohort, n, ESS, OM(1), d'(1) — four columns, three rows.
 ### 5.7 Block 6 — 2×2 LF participation matrix (45 min)
 
 **Goal:** Supplementary analysis of intergenerational LF participation persistence
-(motivated by nilf→nilf measurement issues; see section 3.2).
+(motivated by nonemp→nonemp measurement issues; see section 3.2).
 
 1. Confirm `labforce_pop_*` columns are in `aian_merged`
 2. Define father's LF status from the labforce value in the census year matching
@@ -553,3 +553,117 @@ Note errors or unexpected results for the next session.
 - 25–44 age robustness check (one-liner once main analysis is stable; see section 4.7)
 - Full bootstrap reweighting for `boot_im_by_t` and `mobility_curve_with_boot`
   (continue from block 4)
+
+---
+
+## 6. Remaining Action Items (from April 2026 session)
+
+This section records items identified during the attachment-variable construction session
+that were discussed but not yet implemented.
+
+---
+
+### 6.2 `weighting.R`: Pass alt columns through and save `aian_full`
+
+Two tasks:
+
+1. **Verify alt columns pass through.** Confirm that `occ_pop_alt`, `meso_pop_alt`,
+   `macro_pop_alt`, `occ_son_alt`, `meso_son_alt`, `macro_son_alt`, `attachment_level_son`,
+   `attachment_level_pop`, `picked_year_alt` survive into `aian_weighted.csv`. These
+   columns were added in `cleaning-script.R` but `weighting.R` may have a `select()`
+   that drops them. Check and fix any such drops.
+
+2. **Save `aian_full` as an RDS file.** Add at the end of `weighting.R`:
+
+```r
+saveRDS(aian_full, "data/aian_full.rds")
+```
+
+This is required by the bootstrap reweighting fix (section 1.1 / item 6.4 below):
+`transition_matrices_weighted.R` needs access to the full unlinked AIAN extract
+to re-estimate PS weights on each bootstrap resample. Currently `aian_full` is
+created inside `weighting.R` but not persisted.
+
+---
+
+### 6.3 `transition_matrices_weighted.R`: Alt matrix analysis
+
+After alt columns pass through weighting (item 6.2), implement a side-by-side
+comparison of the main matrix and the attachment matrix.
+
+**Steps:**
+
+1. After loading `aian_weighted.csv`, re-apply factor levels to alt columns:
+```r
+data = data |>
+  mutate(
+    macro_pop_alt = factor(macro_pop_alt, levels = macro_order, ordered = TRUE),
+    macro_son_alt = factor(macro_son_alt, levels = macro_order, ordered = TRUE),
+    meso_pop_alt  = factor(meso_pop_alt,  levels = meso_order,  ordered = TRUE),
+    meso_son_alt  = factor(meso_son_alt,  levels = meso_order,  ordered = TRUE)
+  )
+```
+
+2. Compute the alt macro transition matrix:
+```r
+P_alt = p_matrix(data, macro_pop_alt, macro_son_alt, weighted = TRUE)
+```
+
+3. Run `compute_mobility_stats` on both the main and alt datasets (using `occ_pop_alt`
+   / `occ_son_alt` columns to construct the alt version), and print the side-by-side
+   comparison.
+
+4. Run `boot_pmatrix_ci` on `macro_pop_alt` / `macro_son_alt` once bootstrap
+   reweighting (item 6.4) is wired.
+
+**Decision gate:** if the main and alt matrices are nearly identical, drop the alt
+analysis and note in the paper. If they differ substantially in the nonemp
+row/column, develop the framing as a secondary analysis (not a robustness check).
+
+---
+
+### 6.4 Bootstrap reweighting: full wiring (issue 1.1)
+
+Infrastructure is in place (`compute_weights()` in `utils.R`). Three changes needed:
+
+**Step A — `utils.R`: add `boot_with_reweighting()`**
+
+The template is in section 1.1. Add it to `utils.R` after `compute_weights()`:
+
+```r
+boot_with_reweighting = function(df_linked, df_full, stat_fn, R = 500, .seed = NULL) {
+  if (!is.null(.seed)) set.seed(.seed)
+  N   = nrow(df_linked)
+  est = stat_fn(compute_weights(df_linked, df_full))
+  boots = replicate(R, {
+    idx = sample.int(N, N, replace = TRUE)
+    d_b = compute_weights(df_linked[idx, ], df_full)
+    stat_fn(d_b)
+  })
+  list(estimate = est, se = sd(boots, na.rm = TRUE), draws = boots)
+}
+```
+
+**Step B — `utils.R`: update `boot_pmatrix_ci()`**
+
+Add optional `df_linked` / `df_full` arguments. When provided, call
+`compute_weights(df_linked[idx,], df_full)` on each draw rather than
+resampling the pre-weighted `data` object directly.
+
+**Step C — `transition_matrices_weighted.R`: wire inputs and calls**
+
+At the top of the script, after loading `data`:
+```r
+aian_full        = readRDS("data/aian_full.rds")
+aian_merged_raw  = read_csv("data/aian_merged.csv")  # unweighted linked sample
+```
+
+Update the two `boot_pmatrix_ci` calls (lines ~223–224) to pass
+`df_linked = aian_merged_raw, df_full = aian_full`.
+
+Add a `boot_em_sm()` call using `boot_with_reweighting` with
+`compute_mobility_stats` as the stat function, for global EM/SM CIs.
+
+**Scope boundary:** do NOT update `boot_measures_by_t`, `boot_im_by_t`, or
+`mobility_curve_with_boot` in the same pass — these are memory-measure functions
+that will require additional refactoring. Handle in a separate session.

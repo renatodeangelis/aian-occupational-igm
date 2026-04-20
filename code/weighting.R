@@ -125,3 +125,5 @@ aian_ps = aian_ps |>
   relocate(w_atc_norm, w_trim_norm, .before = starts_with("w_parent"))
 
 write_csv(aian_ps, "data/aian_weighted.csv")
+
+saveRDS(aian_full, "data/aian_full.rds")

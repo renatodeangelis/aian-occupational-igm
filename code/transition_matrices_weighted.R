@@ -241,12 +241,12 @@ results_meso  = boot_measures_by_t(data, meso_pop, meso_son, ts = ts, R = 1000, 
 im_boot_macro = boot_im_by_t(data, macro_pop, macro_son, ts = 0:4, R = 1000, .seed = 123) |>
   mutate(origin = recode(origin,
                          farming = "Farming", manual = "Manual",
-                         nonmanual = "Nonmanual", nilf = "Not working"))
+                         nonmanual = "Nonmanual", nonemp = "Not working"))
 
 im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed = 123) |>
   mutate(origin = recode(origin, farmer = "Farmer", unskilled = "Unskilled",
                          crafts = "Crafts", white_collar = "White Collar",
-                         nilf = "Not working", farmworker = "Farmworker"),
+                         nonemp = "Not working", farmworker = "Farmworker"),
          origin = factor(origin, levels = c("Farmer", "Farmworker", "Crafts",
                                             "Unskilled", "White Collar",
                                             "Not working")))
@@ -263,7 +263,7 @@ om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)
 ############################# 5. PLOTTING ######################################
 ################################################################################
 
-meso_level_order = c("nilf", "nonmanual", "crafts", "unskilled", "farmer", "farmworker")
+meso_level_order = c("nonemp", "nonmanual", "crafts", "unskilled", "farmer", "farmworker")
 
 ## Transition matrix heatmaps ----
 
@@ -359,8 +359,8 @@ compute_mobility_stats = function(df) {
     farming_rows$macro_son == "manual", farming_rows$w_atc_norm, na.rm = TRUE)
   p_farming_given_farming = weighted.mean(
     farming_rows$macro_son == "farming", farming_rows$w_atc_norm, na.rm = TRUE)
-  p_nilf_given_farming = weighted.mean(
-    farming_rows$macro_son == "nilf", farming_rows$w_atc_norm, na.rm = TRUE)
+  p_nonemp_given_farming = weighted.mean(
+    farming_rows$macro_son == "nonemp", farming_rows$w_atc_norm, na.rm = TRUE)
 
   tibble(
     sm                   = round(sm_val, 3),
@@ -368,7 +368,7 @@ compute_mobility_stats = function(df) {
     om                   = round(om_val, 3),
     p_manual_fm_farming  = round(p_manual_given_farming, 3),
     p_farming_fm_farming = round(p_farming_given_farming, 3),
-    p_nilf_fm_farming    = round(p_nilf_given_farming, 3)
+    p_nonemp_fm_farming    = round(p_nonemp_given_farming, 3)
   )
 }
 
