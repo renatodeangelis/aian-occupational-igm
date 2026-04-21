@@ -129,8 +129,8 @@ compute_weights = function(df_linked, df_full) {
       region    = as.factor(region),
       education = as.factor(education))
 
-  model = glm(linked ~ cohort * region + education * region + statefip_1940 + urban_1940,
-              data = comb, family = binomial)
+  model = speedglm::speedglm(linked ~ cohort * region + education * region + statefip_1940 + urban_1940,
+              data = comb, family = binomial())
 
   comb_linked = dplyr::filter(comb, linked == 1)
   comb_full   = dplyr::filter(comb, linked == 0)
@@ -580,7 +580,8 @@ boot_pmatrix_ci = function(
     p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
   }
 
-  boots = replicate(R, boot_once(), simplify = FALSE)
+  boots = parallel::mclapply(seq_len(R), function(i) boot_once(),            
+                             mc.cores = parallel::detectCores() - 1)
   arr   = simplify2array(boots)    # nR × nC × R array
 
   se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
@@ -718,7 +719,8 @@ mobility_curve_with_boot = function(
     as.matrix(compute_em_sm(d_b)[, c("EM", "SM")])   # nT × 2
   }
 
-  boots = replicate(R, boot_once(), simplify = FALSE)
+  boots = parallel::mclapply(seq_len(R), function(i) boot_once(),            
+                             mc.cores = parallel::detectCores() - 1)
   arr   = simplify2array(boots)   # nT × 2 × R
 
   purrr::map_dfr(seq_along(ts), function(i_t) {

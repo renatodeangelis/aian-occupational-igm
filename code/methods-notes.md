@@ -12,7 +12,6 @@ proposed fixes where they exist. Organized by script/stage of the pipeline.
 `weighting.R` now saves `output/balance_table.csv` (cohort, region, education, urban)
 and `output/balance_table_state.csv` after weighting. Remaining decision: whether to
 include a balance table in the appendix or cite the max SMD inline as a footnote.
-
 ---
 
 ## 2. Regional Analysis (`transition_matrices_weighted.R`)

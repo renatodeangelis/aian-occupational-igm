@@ -12,8 +12,9 @@ library(purrr)
 library(maps)
 library(sf)
 library(weights)
+library(jtools)
 
-source("research/projects/aian-igm/code/utils.R")
+source("code/utils.R")
 
 data = read_csv("data/aian_weighted.csv") |>
   mutate(w_atc_norm = w_trim_norm)
@@ -56,7 +57,7 @@ plot_pmat_heatmap = function(boot_df, dad_var, son_var,
 
   ggplot(plot_df, aes(x = !!son_sym, y = !!dad_sym, fill = est)) +
     geom_tile(color = "white") +
-    geom_text(aes(label = sprintf("%.2f\n[%.2f, %.2f]", est, lo, hi)),
+    geom_text(aes(label = sprintf("%.2f\n(%.3f)", est, se)),
               vjust = 0.3, size = text_size) +
     scale_fill_gradient(low = "lightyellow", high = "firebrick") +
     labs(x = "Son's occupation", y = "Father's occupation",
@@ -94,88 +95,6 @@ plot_pi_column = function(vec, title_expr, levels = NULL) {
           axis.ticks.y = element_blank(),
           legend.position = "none",
           plot.title = element_text(hjust = 0.5))
-}
-
-# d(t), d'(t), AM convergence curves
-plot_measure_curves = function(results_df) {
-  ggplot(results_df, aes(x = t, y = est, color = measure, fill = measure)) +
-    geom_ribbon(aes(ymin = lo, ymax = hi), alpha = 0.2, linetype = 0) +
-    geom_line(linetype = 1) +
-    geom_point(size = 1.5) +
-    scale_color_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
-                       labels = c(d = expression(log(d(t))),
-                                  d_prime = expression(log(d*"'"*(t))),
-                                  AM = expression(log(AM(pi[0], t))))) +
-    scale_fill_manual(values = c(d = "#332288", d_prime = "#009E73", AM = "darkred"),
-                      labels = c(d = expression(log(d(t))),
-                                 d_prime = expression(log(d*"'"*(t))),
-                                 AM = expression(log(AM(pi[0], t))))) +
-    scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
-    labs(x = "Generation (t)", y = "log of Measure Value") +
-    theme_minimal() +
-    theme(legend.position = c(0.5, 0.05),
-          legend.justification = c("right", "bottom"),
-          legend.direction = "vertical",
-          legend.title = element_blank(),
-          legend.text = element_text(size = 13),
-          axis.line.x = element_line(linewidth = 0.5),
-          axis.line.y = element_line(linewidth = 0.5),
-          axis.text = element_text(size = 10),
-          axis.ticks = element_line(size = 0.5)) +
-    coord_cartesian(ylim = c(-8, 0))
-}
-
-# IM curves by origin category
-plot_im_curves = function(im_df, color_values) {
-  ggplot(im_df, aes(x = t, y = est, color = origin)) +
-    geom_line(linetype = 1, linewidth = 1) +
-    geom_point(size = 1.5) +
-    scale_x_continuous(breaks = 0:5) +
-    scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
-    scale_color_manual(name = "Occ. Origin", values = color_values) +
-    labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
-    theme_minimal() +
-    theme(legend.position = c(0.5, 0.05),
-          legend.justification = c("right", "bottom"),
-          legend.direction = "vertical",
-          legend.title = element_text(size = 13, face = "bold"),
-          legend.text = element_text(size = 12),
-          axis.line.x = element_line(linewidth = 0.5),
-          axis.line.y = element_line(linewidth = 0.5),
-          axis.text = element_text(size = 10),
-          axis.ticks = element_line(size = 0.5)) +
-    coord_cartesian(ylim = c(-8, 0))
-}
-
-# IM min/max envelope plot
-plot_im_minmax = function(im_df) {
-  im_df |>
-    group_by(t) |>
-    summarise(est_max = max(est), lo_max = max(lo), hi_max = max(hi),
-              est_min = min(est), lo_min = min(lo), hi_min = min(hi),
-              .groups = "drop") |>
-    pivot_longer(
-      cols = c(est_max, lo_max, hi_max, est_min, lo_min, hi_min),
-      names_to = c(".value", "type"),
-      names_pattern = "(.*)_(max|min)") |>
-    ggplot(aes(x = t, y = est, color = type, fill = type)) +
-    geom_ribbon(aes(ymin = lo, ymax = hi, fill = type), alpha = 0.15, linetype = 0) +
-    geom_point(size = 1.5) +
-    geom_line(linetype = 1, linewidth = 1) +
-    scale_x_continuous(breaks = 0:5) +
-    scale_y_continuous(breaks = c(0, -2, -4, -6, -8)) +
-    labs(x = "Generation (t)", y = expression(log~IM(t,i))) +
-    theme_minimal() +
-    theme(legend.position = c(0.5, 0.05),
-          legend.justification = c("right", "bottom"),
-          legend.direction = "vertical",
-          legend.title = element_text(size = 13, face = "bold"),
-          legend.text = element_text(size = 12),
-          axis.line.x = element_line(linewidth = 0.5),
-          axis.line.y = element_line(linewidth = 0.5),
-          axis.text = element_text(size = 10),
-          axis.ticks = element_line(size = 0.5)) +
-    coord_cartesian(ylim = c(-8, 0))
 }
 
 # Region choropleth map
@@ -219,7 +138,7 @@ desc_educd    = weighted_prop_table(data, education)
 ############################# 4. COMPUTATION ###################################
 ################################################################################
 
-ts = 0:4
+ts = 1:4
 
 # Transition matrices with bootstrap CIs
 p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
@@ -239,46 +158,27 @@ verify_ergodic(P_meso_global,  "meso global")
 steady_macro  = pi_star(P_macro_global)
 steady_meso   = pi_star(P_meso_global)
 
-# d(t), d'(t), AM bootstrap
-results_macro = boot_measures_by_t(data, macro_pop, macro_son, ts = ts, R = 1000, .seed = 123)
-results_meso  = boot_measures_by_t(data, meso_pop, meso_son, ts = ts, R = 1000, .seed = 123)
-
-# IM bootstrap
-im_boot_macro = boot_im_by_t(data, macro_pop, macro_son, ts = 0:4, R = 1000, .seed = 123) |>
-  mutate(origin = recode(origin,
-                         farming = "Farming", manual = "Manual",
-                         nonmanual = "Nonmanual", nonemp = "Not working"))
-
-im_boot_meso = boot_im_by_t(data, meso_pop, meso_son, ts = 0:4, R = 1000, .seed = 123) |>
-  mutate(origin = recode(origin, farmer = "Farmer", unskilled = "Unskilled",
-                         crafts = "Crafts", white_collar = "White Collar",
-                         nonemp = "Not working", farmworker = "Farmworker"),
-         origin = factor(origin, levels = c("Farmer", "Farmworker", "Crafts",
-                                            "Unskilled", "White Collar",
-                                            "Not working")))
-
-# Overall mobility bootstrap
+# EM/SM bootstrap
 macro_om = mobility_curve_with_boot(data, macro_pop, macro_son,
                                      df_linked = data, df_full = aian_full,
-                                     ts = 1:6)
+                                     ts = 1:4, R = 500, .seed = 123)
 meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son,
                                      df_linked = data, df_full = aian_full,
-                                     ts = 1:6)
+                                     ts = 1:4, R = 500, .seed = 123)
 
-# OM is no longer returned by mobility_curve_with_boot (EM/SM only).
-# lo/hi are derived from SE for the ribbon; 1.96 gives approximate 95% bands.
+# lo/hi are approximate 95% bands from SE; OM recoverable as EM + SM at caller level.
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
   mutate(
     level = factor(level, labels = c("meso", "macro")),
     lo    = est - 1.96 * se,
     hi    = est + 1.96 * se
-  ) |>
-  filter(measure == "EM")
+  )
 
 ################################################################################
 ############################# 5. PLOTTING ######################################
 ################################################################################
 
+macro_level_order = c("nonemp", "nonmanual", "manual", "farmer")
 meso_level_order = c("nonemp", "nonmanual", "crafts", "unskilled", "farmer", "farmworker")
 
 ## Transition matrix heatmaps ----
@@ -294,30 +194,6 @@ g0_meso     = plot_pi_column(pi0_vec_meso, expression(pi[0]), levels = meso_leve
 g_star_meso = plot_pi_column(steady_meso, expression(pi^"*"), levels = meso_level_order)
 combined_plot_meso = g_meso + g0_meso + g_star_meso + plot_layout(widths = c(6, 1, 1))
 
-## d(t), d'(t), AM convergence curves ----
-
-measure_plot_macro = plot_measure_curves(results_macro)
-measure_plot_meso  = plot_measure_curves(results_meso)
-combined_measures  = measure_plot_macro + measure_plot_meso
-
-## IM curves ----
-
-im_macro_plot = plot_im_curves(im_boot_macro,
-  c("Farming" = "forestgreen", "Manual" = "firebrick",
-    "Nonmanual" = "steelblue", "Not working" = "darkorange"))
-
-im_meso_plot = plot_im_curves(im_boot_meso,
-  c("Farmer" = "darkgreen", "Farmworker" = "#90EE90",
-    "Crafts" = "darkred", "Unskilled" = "pink",
-    "White Collar" = "darkblue", "Not working" = "darkorange"))
-
-im_combined = im_macro_plot + im_meso_plot + plot_layout(widths = c(2, 2))
-
-## IM min/max envelopes ----
-
-im_minmax_macro = plot_im_minmax(im_boot_macro)
-im_minmax_meso  = plot_im_minmax(im_boot_meso)
-
 ## Overall mobility ----
 
 om_plot = ggplot(om_total, aes(x = t, y = est)) +
@@ -330,11 +206,11 @@ om_plot = ggplot(om_total, aes(x = t, y = est)) +
   scale_x_continuous(breaks = 0:6) +
   scale_y_continuous(breaks = seq(0, 0.7, 0.1)) +
   scale_linetype_manual(name = "Measure",
-                        labels = c("Exchange Mobility"),
-                        values = c(EM = "dashed")) +
+                        labels = c(EM = "Exchange Mobility", SM = "Structural Mobility"),
+                        values = c(EM = "dashed", SM = "solid")) +
   scale_shape_manual(name = "Measure",
-                     labels = c("Exchange Mobility"),
-                     values = c(EM = 17)) +
+                     labels = c(EM = "Exchange Mobility", SM = "Structural Mobility"),
+                     values = c(EM = 17, SM = 16)) +
   scale_fill_manual(name = "Level",
                     labels = c("Meso (6 categories)", "Macro (4 categories)"),
                     values = c("meso" = "#009E73", "macro" = "#D55E00")) +
@@ -361,12 +237,12 @@ om_plot
 compute_mobility_stats = function(df) {
   df = df |> mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
 
-  P      = p_matrix(df, macro_pop, macro_son, weighted = TRUE)
+  P      = p_matrix(df, macro_pop, macro_son)
   pi0    = pi_0(df, macro_pop)
   pistar = pi_star(P)
 
   om_val = om(P, pi0, t = 0)
-  sm_val = sum(abs(as.numeric(pi0) - as.numeric(pistar))) / 2
+  sm_val = sm(P, pi0, t = 0)
   em_val = om_val - sm_val
 
   # Farming-family decomposition
@@ -378,13 +254,25 @@ compute_mobility_stats = function(df) {
   p_nonemp_given_farming = weighted.mean(
     farming_rows$macro_son == "nonemp", farming_rows$w_atc_norm, na.rm = TRUE)
 
+  # Nonemp-family decomposition
+  nonemp_rows = df |> filter(macro_pop == "nonemp")
+  p_nonemp_given_nonemp = weighted.mean(
+    nonemp_rows$macro_son == "nonemp", nonemp_rows$w_atc_norm, na.rm = TRUE)
+
+  # Marginal son distribution
+  p_son_nonemp    = weighted.mean(df$macro_son == "nonemp",    df$w_atc_norm, na.rm = TRUE)
+  p_son_nonmanual = weighted.mean(df$macro_son == "nonmanual", df$w_atc_norm, na.rm = TRUE)
+
   tibble(
     sm                   = round(sm_val, 3),
     em                   = round(em_val, 3),
     om                   = round(om_val, 3),
     p_manual_fm_farming  = round(p_manual_given_farming, 3),
     p_farming_fm_farming = round(p_farming_given_farming, 3),
-    p_nonemp_fm_farming    = round(p_nonemp_given_farming, 3)
+    p_nonemp_fm_farming  = round(p_nonemp_given_farming, 3),
+    p_nonemp_fm_nonemp   = round(p_nonemp_given_nonemp, 3),
+    p_son_nonemp         = round(p_son_nonemp, 3),
+    p_son_nonmanual      = round(p_son_nonmanual, 3)
   )
 }
 
@@ -416,6 +304,7 @@ states_sf = st_as_sf(map("state", plot = FALSE, fill = TRUE)) |>
   rename(state_name = ID) |>
   left_join(state_regions, by = "state_name") |>
   st_make_valid() |>
+  st_buffer(dist = 0) |>
   left_join(results_region, by = "region")
 
 sf::sf_use_s2(FALSE)
@@ -437,6 +326,18 @@ sm_plot = plot_region_map(states_sf, regions_sf, centroids,
 em_plot = plot_region_map(states_sf, regions_sf, centroids,
                                 em, em,
                                 "Exchange Mobility by Region")
+
+p_manual_plot = plot_region_map(states_sf, regions_sf, centroids,
+                                p_manual_fm_farming, p_manual_fm_farming,
+                                "P(Manual | Father Farming) by Region")
+
+p_farming_plot = plot_region_map(states_sf, regions_sf, centroids,
+                                 p_farming_fm_farming, p_farming_fm_farming,
+                                 "P(Farming | Father Farming) by Region")
+
+p_nonemp_plot = plot_region_map(states_sf, regions_sf, centroids,
+                                p_nonemp_fm_farming, p_nonemp_fm_farming,
+                                "P(Nonemp | Father Farming) by Region")
 
 ################################################################################
 #################### 7. SUPPLEMENTARY: COHORT STATIONARITY ####################
@@ -477,10 +378,229 @@ cohort_results = cohort_labels |>
     )
   })
 
+cohort_tbl = purrr::map_dfr(cohort_results, function(res) {
+  tibble(cohort = res$cohort, om_1 = res$om, d_prime_1 = res$d_prime)
+})
+
+cat("\n--- Cohort stationarity: OM(1) and d'(1) by birth cohort ---\n")
+print(cohort_tbl)
+
 cat("\n--- Macro transition matrices by cohort ---\n")
 for (res in cohort_results) {
-  cat("\nCohort:", res$cohort,
-      "  OM(1) =", res$om,
-      "  d'(1) =", res$d_prime, "\n")
+  cat("\nCohort:", res$cohort, "\n")
   print(round(res$P, 3))
 }
+
+################################################################################
+##################### 8. ALT MATRIX (ATTACHMENT-FIRST) ########################
+################################################################################
+
+# Men with a valid occ code but no recorded labor market activity are
+# reclassified to nonemp, applied symmetrically to fathers and sons.
+# data_alt renames the alt columns into the main column slots so all
+# existing functions (pi_0, p_matrix, compute_mobility_stats) work unchanged.
+
+data_alt = data |>
+  select(-macro_pop, -macro_son, -meso_pop, -meso_son) |>
+  rename(
+    macro_pop = macro_pop_alt,
+    macro_son = macro_son_alt,
+    meso_pop  = meso_pop_alt,
+    meso_son  = meso_son_alt
+  )
+
+## Alt transition matrices ----
+
+p_mat_macro_alt = boot_pmatrix_ci(data_alt, macro_pop, macro_son,
+                                   df_linked = data_alt, df_full = aian_full,
+                                   R = 500, .seed = 123)
+
+pi0_vec_macro_alt  = pi_0(data_alt, macro_pop)
+P_macro_alt_global = p_matrix(data_alt, macro_pop, macro_son)
+verify_ergodic(P_macro_alt_global, "macro alt global")
+steady_macro_alt   = pi_star(P_macro_alt_global)
+
+## Mobility stats: main vs alt ----
+
+stats_main = compute_mobility_stats(data)
+stats_alt  = compute_mobility_stats(data_alt)
+
+comparison_tbl = bind_rows(
+  stats_main |> mutate(matrix = "main (occ-first)"),
+  stats_alt  |> mutate(matrix = "alt (attachment-first)")
+) |> select(matrix, everything())
+
+cat("\n--- Main vs Alt: global mobility statistics ---\n")
+print(comparison_tbl)
+
+## Regional comparison ----
+
+results_region_alt = data_alt |>
+  group_by(region) |>
+  group_modify(~ compute_mobility_stats(.x)) |>
+  ungroup() |>
+  left_join(count(data_alt, region), by = "region")
+
+comparison_region_tbl = bind_rows(
+  results_region     |> mutate(matrix = "main"),
+  results_region_alt |> mutate(matrix = "alt")
+) |> select(matrix, region, n, sm, em, p_nonemp_fm_farming, p_manual_fm_farming,
+            p_farming_fm_farming)
+
+cat("\n--- Main vs Alt: regional mobility statistics ---\n")
+print(comparison_region_tbl)
+
+## Alt heatmap plots ----
+
+g_macro_alt      = plot_pmat_heatmap(p_mat_macro_alt, macro_pop, macro_son,
+                                     title_expr = expression(P^{alt}))
+g0_macro_alt     = plot_pi_column(pi0_vec_macro_alt, expression(pi[0]^{alt}))
+g_star_macro_alt = plot_pi_column(steady_macro_alt, expression(pi^{"*,alt"}))
+combined_plot_macro_alt = g_macro_alt + g0_macro_alt + g_star_macro_alt +
+  plot_layout(widths = c(6, 1, 1))
+
+combined_main_vs_alt = combined_plot_macro / combined_plot_macro_alt
+combined_main_vs_alt
+
+################################################################################
+####################### 9. REGIONAL SUMMARY TABLE #############################
+################################################################################
+
+regional_table = results_region |>
+  select(region, n, sm, em, p_manual_fm_farming,
+         p_farming_fm_farming, p_nonemp_fm_farming) |>
+  arrange(desc(sm))
+
+cat("\n--- Regional summary table ---\n")
+print(
+  knitr::kable(
+    regional_table,
+    col.names = c("Region", "N", "SM", "EM",
+                  "P(Manual|Farm)", "P(Farm|Farm)", "P(Nonemp|Farm)"),
+    digits  = 3,
+    caption = "Regional mobility statistics (weighted macro 4x4)"
+  )
+)
+
+# SM share of total mobility at t=1 — the paper's headline ratio
+em_sm_ratio = om_total |>
+  filter(t == 1, level == "macro") |>
+  select(measure, est) |>
+  pivot_wider(names_from = measure, values_from = est) |>
+  mutate(sm_share = round(SM / (SM + EM), 3),
+         om       = round(SM + EM, 3))
+
+cat("\n--- SM share of OM at t=1 (macro) ---\n")
+print(em_sm_ratio)
+
+################################################################################
+####################### 10. ROBUSTNESS: AGE 25-44 #############################
+################################################################################
+
+data_2544 = data |>
+  filter((1940 - birthyr_son) >= 25, (1940 - birthyr_son) <= 44) |>
+  mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
+
+cat(sprintf("\n--- Age restriction: main n = %d, 25-44 n = %d (%.0f%% loss) ---\n",
+            nrow(data), nrow(data_2544),
+            (1 - nrow(data_2544) / nrow(data)) * 100))
+
+stats_2544 = compute_mobility_stats(data_2544)
+
+robustness_tbl = bind_rows(
+  stats_main |> mutate(sample = "main (20-44)"),
+  stats_2544 |> mutate(sample = "restricted (25-44)")
+) |> select(sample, everything())
+
+cat("\n--- Robustness: main vs 25-44 restricted sample ---\n")
+print(robustness_tbl)
+
+# Transition matrix for visual comparison
+P_2544 = p_matrix(data_2544, macro_pop, macro_son)
+cat("\nRestricted (25-44) macro transition matrix:\n")
+print(round(P_2544, 3))
+cat("\nMain macro transition matrix:\n")
+print(round(P_macro_global, 3))
+
+################################################################################
+####################### 11. UNIDIFF BY REGION #################################
+################################################################################
+
+# Tests whether regional variation in father-son association is a difference
+# in degree (phi_k varies, pattern fixed) or kind (pattern changes).
+# Macro 4x4 used to avoid sparse cells in smaller regions.
+# Weighted cell frequencies passed as response; Poisson family is valid with
+# fractional counts — coefficient estimates are consistent.
+
+library(gnm)
+
+region_long = data |>
+  count(region, macro_pop, macro_son, wt = w_atc_norm, name = "freq") |>
+  mutate(
+    region    = factor(region),
+    macro_pop = factor(macro_pop, levels = macro_order),
+    macro_son = factor(macro_son, levels = macro_order)
+  )
+
+# Conditional independence baseline (no association layer)
+unidiff_null = gnm(
+  freq ~ region + macro_pop + macro_son,
+  data = region_long, family = poisson, trace = FALSE
+)
+
+# UNIDIFF: single multiplier phi_k scales a common association pattern per region
+unidiff_mod = gnm(
+  freq ~ region + macro_pop + macro_son +
+         Mult(Exp(region), macro_pop:macro_son),
+  data = region_long, family = poisson, trace = FALSE
+)
+
+# Saturated association (region-specific full interaction — no constraint)
+unidiff_sat = gnm(
+  freq ~ region + macro_pop + macro_son + region:(macro_pop:macro_son),
+  data = region_long, family = poisson, trace = FALSE
+)
+
+cat("\n--- UNIDIFF model fit ---\n")
+cat(sprintf("Null (indep):  df = %d,  deviance = %.2f\n",
+            df.residual(unidiff_null), deviance(unidiff_null)))
+cat(sprintf("UNIDIFF:       df = %d,  deviance = %.2f\n",
+            df.residual(unidiff_mod),  deviance(unidiff_mod)))
+cat(sprintf("Saturated:     df = %d,  deviance = %.2f\n",
+            df.residual(unidiff_sat),  deviance(unidiff_sat)))
+
+# Extract phi_k (the UNIDIFF multipliers, one per region)
+phi_idx = pickCoef(unidiff_mod, "Exp\\(region\\)")
+phi_est = coef(unidiff_mod)[phi_idx]
+phi_se  = sqrt(diag(vcov(unidiff_mod)))[phi_idx]
+
+phi_tbl = tibble(
+  region = levels(region_long$region),
+  phi    = round(exp(phi_est), 3),   # exponentiate: phi > 1 = stronger association
+  se     = round(phi_se, 3)
+)
+
+cat("\n--- UNIDIFF phi parameters by region (ref = first level) ---\n")
+print(phi_tbl)
+
+################################################################################
+############################# 12. SAVE FIGURES ################################
+################################################################################
+
+dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
+
+# Transition matrix heatmaps (wide: P matrix + pi_0 + pi*)
+ggsave("output/figures/pmat_macro.pdf",        combined_plot_macro,      width = 14, height = 6)
+ggsave("output/figures/pmat_meso.pdf",         combined_plot_meso,       width = 14, height = 6)
+ggsave("output/figures/pmat_alt_macro.pdf",    combined_plot_macro_alt,  width = 14, height = 6)
+ggsave("output/figures/pmat_main_vs_alt.pdf",  combined_main_vs_alt,     width = 14, height = 12)
+
+# EM/SM mobility curves
+ggsave("output/figures/om_plot.pdf",           om_plot,         width = 8,  height = 6)
+
+# Regional maps
+ggsave("output/figures/map_sm.pdf",            sm_plot,         width = 10, height = 6)
+ggsave("output/figures/map_em.pdf",            em_plot,         width = 10, height = 6)
+ggsave("output/figures/map_p_manual.pdf",      p_manual_plot,   width = 10, height = 6)
+ggsave("output/figures/map_p_farming.pdf",     p_farming_plot,  width = 10, height = 6)
+ggsave("output/figures/map_p_nonemp.pdf",      p_nonemp_plot,   width = 10, height = 6)
