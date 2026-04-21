@@ -128,11 +128,13 @@ desc_main = data |>
             age_son_mean = weighted.mean(age_son, w_atc_norm),
             age_son_sd = wtd.sd(age_son, w_atc_norm))
 
-desc_region   = weighted_prop_table(data, region) |>
+desc_region = weighted_prop_table(data, region) |>
   mutate(prop = round(prop, 1))
-desc_meso_pop = weighted_prop_table(data, meso_pop)
-desc_meso_son = weighted_prop_table(data, meso_son)
-desc_educd    = weighted_prop_table(data, education)
+desc_macro_pop = weighted_prop_table(data, macro_pop)
+desc_macro_pop_alt = weighted_prop_table(data, macro_pop_alt)
+desc_macro_son = weighted_prop_table(data, macro_son)
+desc_macro_son_alt = weighted_prop_table(data, macro_son_alt)
+desc_educd = weighted_prop_table(data, education)
 
 ################################################################################
 ############################# 4. COMPUTATION ###################################
@@ -140,13 +142,36 @@ desc_educd    = weighted_prop_table(data, education)
 
 ts = 1:4
 
+# Bootstrap cache — set force_rerun = TRUE to discard cache and re-estimate.
+# Delete individual files from cache/ to selectively re-run one bootstrap.
+# Note: cache is not auto-invalidated if aian_weighted.csv changes; delete
+# cache/ manually after re-running weighting.R.
+force_rerun <- FALSE
+cache_dir   <- "cache"
+dir.create(cache_dir, showWarnings = FALSE)
+
+cache_load <- function(name, expr, force = force_rerun) {
+  path <- file.path(cache_dir, paste0(name, ".rds"))
+  if (!force && file.exists(path)) {
+    message("Loading cached: ", name)
+    return(readRDS(path))
+  }
+  result <- eval(expr, envir = parent.frame())
+  saveRDS(result, path)
+  result
+}
+
 # Transition matrices with bootstrap CIs
-p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
-                               df_linked = data, df_full = aian_full,
-                               R = 500, .seed = 123)
-p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son,
-                               df_linked = data, df_full = aian_full,
-                               R = 500, .seed = 123)
+p_mat_macro = cache_load("p_mat_macro", quote(
+  boot_pmatrix_ci(data, macro_pop, macro_son,
+                  df_linked = data, df_full = aian_full,
+                  R = 500, .seed = 123)
+))
+p_mat_meso  = cache_load("p_mat_meso", quote(
+  boot_pmatrix_ci(data, meso_pop, meso_son,
+                  df_linked = data, df_full = aian_full,
+                  R = 500, .seed = 123)
+))
 
 # Initial and stationary distributions
 pi0_vec_macro = pi_0(data, macro_pop)
@@ -159,12 +184,16 @@ steady_macro  = pi_star(P_macro_global)
 steady_meso   = pi_star(P_meso_global)
 
 # EM/SM bootstrap
-macro_om = mobility_curve_with_boot(data, macro_pop, macro_son,
-                                     df_linked = data, df_full = aian_full,
-                                     ts = 1:4, R = 500, .seed = 123)
-meso_om  = mobility_curve_with_boot(data, meso_pop, meso_son,
-                                     df_linked = data, df_full = aian_full,
-                                     ts = 1:4, R = 500, .seed = 123)
+macro_om = cache_load("macro_om", quote(
+  mobility_curve_with_boot(data, macro_pop, macro_son,
+                            df_linked = data, df_full = aian_full,
+                            ts = 1:4, R = 500, .seed = 123)
+))
+meso_om  = cache_load("meso_om", quote(
+  mobility_curve_with_boot(data, meso_pop, meso_son,
+                            df_linked = data, df_full = aian_full,
+                            ts = 1:4, R = 500, .seed = 123)
+))
 
 # lo/hi are approximate 95% bands from SE; OM recoverable as EM + SM at caller level.
 om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)) |>
@@ -411,9 +440,11 @@ data_alt = data |>
 
 ## Alt transition matrices ----
 
-p_mat_macro_alt = boot_pmatrix_ci(data_alt, macro_pop, macro_son,
-                                   df_linked = data_alt, df_full = aian_full,
-                                   R = 500, .seed = 123)
+p_mat_macro_alt = cache_load("p_mat_macro_alt", quote(
+  boot_pmatrix_ci(data_alt, macro_pop, macro_son,
+                  df_linked = data_alt, df_full = aian_full,
+                  R = 500, .seed = 123)
+))
 
 pi0_vec_macro_alt  = pi_0(data_alt, macro_pop)
 P_macro_alt_global = p_matrix(data_alt, macro_pop, macro_son)
@@ -550,10 +581,10 @@ unidiff_null = gnm(
 
 # UNIDIFF: single multiplier phi_k scales a common association pattern per region
 unidiff_mod = gnm(
-  freq ~ region + macro_pop + macro_son +
-         Mult(Exp(region), macro_pop:macro_son),
-  data = region_long, family = poisson, trace = FALSE
-)
+    freq ~ region + macro_pop + macro_son +                                  
+           Mult(region, macro_pop:macro_son),
+    data = region_long, family = poisson, trace = FALSE                      
+  )                                                         
 
 # Saturated association (region-specific full interaction — no constraint)
 unidiff_sat = gnm(
