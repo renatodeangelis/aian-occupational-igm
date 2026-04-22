@@ -365,8 +365,8 @@ p_farming_plot = plot_region_map(states_sf, regions_sf, centroids,
                                  "P(Farming | Father Farming) by Region")
 
 p_nonemp_plot = plot_region_map(states_sf, regions_sf, centroids,
-                                p_nonemp_fm_farming, p_nonemp_fm_farming,
-                                "P(Nonemp | Father Farming) by Region")
+                                p_nonemp_fm_nonemp, p_nonemp_fm_nonemp,
+                                "P(Nonemp | Father Nonemp) by Region")
 
 ################################################################################
 #################### 7. SUPPLEMENTARY: COHORT STATIONARITY ####################
@@ -479,6 +479,43 @@ comparison_region_tbl = bind_rows(
 
 cat("\n--- Main vs Alt: regional mobility statistics ---\n")
 print(comparison_region_tbl)
+
+## Alt regional maps ----
+
+states_sf_alt = st_as_sf(map("state", plot = FALSE, fill = TRUE)) |>
+  rename(state_name = ID) |>
+  left_join(state_regions, by = "state_name") |>
+  st_make_valid() |>
+  st_buffer(dist = 0) |>
+  left_join(results_region_alt, by = "region")
+
+regions_sf_alt = states_sf_alt |>
+  filter(!is.na(region)) |>
+  group_by(region) |>
+  summarize(geom = st_union(geom), .groups = "drop")
+
+centroids_alt = st_centroid(regions_sf_alt) |>
+  left_join(results_region_alt, by = "region")
+
+sm_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
+                              sm, sm,
+                              "Structural Mobility by Region (Alt)")
+
+em_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
+                              em, em,
+                              "Exchange Mobility by Region (Alt)")
+
+p_manual_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
+                                    p_manual_fm_farming, p_manual_fm_farming,
+                                    "P(Manual | Father Farming) by Region (Alt)")
+
+p_farming_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
+                                     p_farming_fm_farming, p_farming_fm_farming,
+                                     "P(Farming | Father Farming) by Region (Alt)")
+
+p_nonemp_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
+                                    p_nonemp_fm_nonemp, p_nonemp_fm_nonemp,
+                                    "P(Nonemp | Father Nonemp) by Region (Alt)")
 
 ## Alt heatmap plots ----
 
@@ -634,3 +671,10 @@ ggsave("output/figures/map_em.pdf",            em_plot,         width = 10, heig
 ggsave("output/figures/map_p_manual.pdf",      p_manual_plot,   width = 10, height = 6)
 ggsave("output/figures/map_p_farming.pdf",     p_farming_plot,  width = 10, height = 6)
 ggsave("output/figures/map_p_nonemp.pdf",      p_nonemp_plot,   width = 10, height = 6)
+
+# Alt regional maps
+ggsave("output/figures/map_sm_alt.pdf",        sm_plot_alt,        width = 10, height = 6)
+ggsave("output/figures/map_em_alt.pdf",        em_plot_alt,        width = 10, height = 6)
+ggsave("output/figures/map_p_manual_alt.pdf",  p_manual_plot_alt,  width = 10, height = 6)
+ggsave("output/figures/map_p_farming_alt.pdf", p_farming_plot_alt, width = 10, height = 6)
+ggsave("output/figures/map_p_nonemp_alt.pdf",  p_nonemp_plot_alt,  width = 10, height = 6)

@@ -31,12 +31,11 @@ No build automation exists. Run scripts from RStudio or via `Rscript` from the r
 
 2. **`weighting.R`** — Loads `aian_merged.csv` plus a full AIAN census extract, fits a logistic PS model (`linked ~ birthyr_son + region + education`), computes ATC weights, outputs `aian_weighted.csv`.
 
-3. **`transition_matrices_weighted.R`** — The main analysis script (1100+ lines). Computes weighted 4×4 transition matrices (meso → meso), mobility measures (OM, EM, SM, upward/downward ratios, convergence to stationary distribution), performs bootstrap inference, and generates all publication figures.
+3. **`transition_matrices_weighted.R`** — The main analysis script. Computes weighted 4×4 transition matrices (meso → meso), mobility measures (OM, EM, SM), performs bootstrap inference, and generates all publication figures.
 
 **Occupation classification hierarchy:**
-- Raw `occ1950` codes → **meso** categories (in `cleaning-script.R` / `weighting.R`): `farmer`, `farmworker`, `prof`, `clerical`, `crafts`, `unskilled`, `unemp`
-- `transition_matrices_weighted.R` collapses `prof` + `clerical` → `white_collar` at load time, yielding 6 meso categories: `farmer`, `farmworker`, `white_collar`, `crafts`, `unskilled`, `unemp`
-- Meso → **macro** categories: `farming`, `manual`, `nonmanual`, `unemp`
+- Raw `occ1950` codes → **meso** categories (in `cleaning-script.R` / `weighting.R`): `farmer`, `farmworker`, `nonmanual`, `crafts`, `unskilled`, `nonemp`
+- Meso → **macro** categories: `farming`, `manual`, `nonmanual`, `nonemp`
 
 **Regional stratification:** 12 U.S. regions (basin, cali, lakes, midwest, nc, ne, nw, ok, plains, prairie, south, sw).
 
@@ -46,12 +45,7 @@ No build automation exists. Run scripts from RStudio or via `Rscript` from the r
 
 ## Known Methodological Issues
 
-`code/methods-notes.md` documents 20+ outstanding issues. The most consequential:
-
-- **2.5 (critical)**: Bootstrap reuses weights estimated on the full sample — SEs are understated. Fix requires re-estimating PS model on each bootstrap resample.
-- **3.1**: Within-region weights are not renormalized before regional statistics are computed.
-
-Before modifying occupation classification logic, check both `cleaning-script.R` (lines 119–141) and `weighting.R` (lines 29–51) — they must stay in sync until issue 1.8 is resolved.
+`code/methods-notes.md` documents 20+ outstanding issues.
 
 ## Data
 
