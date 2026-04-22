@@ -428,7 +428,6 @@ for (res in cohort_results) {
 # reclassified to nonemp, applied symmetrically to fathers and sons.
 # data_alt renames the alt columns into the main column slots so all
 # existing functions (pi_0, p_matrix, compute_mobility_stats) work unchanged.
-
 data_alt = data |>
   select(-macro_pop, -macro_son, -meso_pop, -meso_son) |>
   rename(

@@ -703,7 +703,7 @@ mobility_curve_with_boot = function(
       mu1 = as.numeric(mu %*% P)           # one step forward from mu
       om_v = 1 - sum(mu * diag(P))         # overall mobility at t
       sm_v = tv_norm(mu, mu1)              # structural component
-      tibble::tibble(t = tt, EM = om_v - sm_v, SM = sm_v)
+      tibble::tibble(t = tt, EM = om_v - sm_v, SM = sm_v, OM = om_v)
     })
   }
 
@@ -716,7 +716,7 @@ mobility_curve_with_boot = function(
     idx = sample.int(N, N, replace = TRUE)
     w_b = compute_weights(df_linked[idx, ], df_full)
     d_b = trim_weights_top1(w_b$data)
-    as.matrix(compute_em_sm(d_b)[, c("EM", "SM")])   # nT × 2
+    as.matrix(compute_em_sm(d_b)[, c("EM", "SM", "OM")])   # nT × 3
   }
 
   boots = parallel::mclapply(seq_len(R), function(i) boot_once(),            
@@ -724,13 +724,13 @@ mobility_curve_with_boot = function(
   arr   = simplify2array(boots)   # nT × 2 × R
 
   purrr::map_dfr(seq_along(ts), function(i_t) {
-    # draws is a 2 × R matrix; rows correspond to EM and SM respectively.
+    # draws is a 3 × R matrix; rows correspond to EM, SM, OM respectively.
     draws = arr[i_t, , , drop = FALSE]
-    draws = matrix(draws, nrow = 2, ncol = R)
+    draws = matrix(draws, nrow = 3, ncol = R)
     tibble::tibble(
       t       = ts[i_t],
-      measure = c("EM", "SM"),
-      est     = as.numeric(point_df[i_t, c("EM", "SM")]),
+      measure = c("EM", "SM", "OM"),
+      est     = as.numeric(point_df[i_t, c("EM", "SM", "OM")]),
       se      = apply(draws, 1, sd, na.rm = TRUE)
     )
   })
