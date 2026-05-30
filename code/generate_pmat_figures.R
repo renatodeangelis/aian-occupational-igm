@@ -206,22 +206,20 @@ macro_alt_om <- cache_load("macro_alt_om_slides", quote(
                            ts = 0:4, R = 100, .seed = 123)
 ))
 
-om_combined <- bind_rows(
-  macro_om     |> filter(measure != "SM") |> mutate(series = "Main"),
-  macro_alt_om |> filter(measure != "SM") |> mutate(series = "Alt")
-) |> mutate(
-  lo = est - 1.96 * se,
-  hi = est + 1.96 * se
-)
+om_combined <- macro_om |>
+  filter(measure != "SM") |>
+  mutate(
+    lo = est - 1.96 * se,
+    hi = est + 1.96 * se
+  )
 
 om_plot <- ggplot(om_combined, aes(x = t, y = est)) +
   geom_ribbon(data = filter(om_combined, measure == "EM"),
-              aes(ymin = lo, ymax = hi, fill = series,
-                  group = interaction(series, measure)),
-              alpha = 0.2, color = NA) +
-  geom_line(aes(color = series, linetype = measure,
-                group = interaction(series, measure)), linewidth = 1) +
-  geom_point(aes(shape = measure, color = series), size = 2.5) +
+              aes(ymin = lo, ymax = hi, group = measure),
+              fill = "#D55E00", alpha = 0.2, color = NA) +
+  geom_line(aes(linetype = measure, group = measure),
+            color = "#D55E00", linewidth = 1) +
+  geom_point(aes(shape = measure), color = "#D55E00", size = 2.5) +
   scale_x_continuous(breaks = 0:4) +
   scale_y_continuous(breaks = seq(0, 0.7, 0.1)) +
   scale_linetype_manual(name = "Measure",
@@ -230,12 +228,6 @@ om_plot <- ggplot(om_combined, aes(x = t, y = est)) +
   scale_shape_manual(name = "Measure",
                      labels = c(EM = "Exchange Mobility", OM = "Overall Mobility"),
                      values = c(EM = 17, OM = 16)) +
-  scale_fill_manual(name = "Sample",
-                    values = c("Main" = "#D55E00",
-                               "Alt" = "#0072B2")) +
-  scale_color_manual(name = "Sample",
-                     values = c("Main" = "#D55E00",
-                                "Alt" = "#0072B2")) +
   labs(x = "Generation (t)", y = "Probability to move") +
   theme_minimal() +
   theme(legend.position   = "bottom",
