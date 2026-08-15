@@ -5,7 +5,7 @@ library(ggplot2)
 
 source("code/utils.R")
 
-aian_merged = read_csv("data/aian_merged.csv") |>
+aian_merged = readRDS("data/aian_merged.rds") |>
   mutate(region = assign_region(statefip_1940),
          education = classify_education(educd_1940))
 
@@ -77,7 +77,7 @@ aian_ps = aian_ps |>
 ess_trimmed = sum(aian_ps$w_trim_norm)^2 / sum(aian_ps$w_trim_norm^2)
 cat("ESS after trimming:", round(ess_trimmed, 1), "\n")
 
-# --- 2.6 fix: Covariate balance diagnostics ---
+# --- Covariate balance diagnostics ---
 aian_comb_bal = aian_comb |>
   mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm)) |>
   left_join(aian_ps |> select(histid_1940, w_trim_norm), by = "histid_1940") |>
@@ -91,7 +91,6 @@ bt = bal.tab(linked ~ cohort + region + education + urban_1940,
 cat("\n--- Covariate balance (untrimmed weights) ---\n")
 print(bt)
 dir.create("output", showWarnings = FALSE)
-write_csv(as.data.frame(bt$Balance), "output/balance_table.csv")
 
 # --- Balance: trimmed weights (what goes into analysis) ---
 bt_trim = bal.tab(linked ~ cohort + region + education + urban_1940,
@@ -100,7 +99,6 @@ bt_trim = bal.tab(linked ~ cohort + region + education + urban_1940,
                   un = FALSE)
 cat("\n--- Covariate balance (trimmed weights) ---\n")
 print(bt_trim)
-write_csv(as.data.frame(bt_trim$Balance), "output/balance_table_trimmed.csv")
 
 bt_state = bal.tab(linked ~ statefip_1940,
                    data = aian_comb_bal, weights = "w_trim_norm",
@@ -115,7 +113,6 @@ if (any(abs(state_smds) > 0.2)) {
   cat("WARNING: States with |SMD| > 0.2:",
       paste(bad_states, collapse = ", "), "\n")
 }
-write_csv(as.data.frame(bt_state$Balance), "output/balance_table_state.csv")
 
 # --- Finalize and write ---
 aian_ps = aian_ps |>
@@ -124,6 +121,6 @@ aian_ps = aian_ps |>
   relocate(starts_with("w_parent"), .after = last_col()) |>
   relocate(w_atc_norm, w_trim_norm, .before = starts_with("w_parent"))
 
-write_csv(aian_ps, "data/aian_weighted.csv")
+saveRDS(aian_ps, "data/aian_weighted.rds")
 
 saveRDS(aian_full, "data/aian_full.rds")

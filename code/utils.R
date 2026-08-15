@@ -4,17 +4,18 @@
 
 # --- Occupation classification ---
 
-classify_meso = function(occ, split_farmer = TRUE) {
-  farmer_codes = c(100, 123)
-  nonman_codes = c(1:99, 200:290, 300:490)
-  crafts_codes = c(762, 773, 781, 782)
+classify_meso = function(occ) {
+  farmer_codes   = c(100, 123, 830)
+  farmwork_codes = c(810, 820, 840)
+  nonman_codes   = c(1:99, 200:290, 300:490)
+  crafts_codes   = c(762, 773, 781, 782)
 
   case_when(
-    occ %in% farmer_codes ~ "farmer",
-    split_farmer & occ %in% 810:840 ~ "farmworker",
-    occ %in% nonman_codes ~ "nonmanual",
+    occ %in% farmer_codes   ~ "farmer",
+    occ %in% farmwork_codes ~ "farmworker",
+    occ %in% nonman_codes   ~ "nonmanual",
     occ %in% 500:594 | occ %in% crafts_codes ~ "crafts",
-    occ %in% 595:970 & !(occ %in% crafts_codes) & !(split_farmer & occ %in% 810:840) ~ "unskilled",
+    occ %in% 595:970 & !(occ %in% crafts_codes) & !(occ %in% farmwork_codes) ~ "unskilled",
     occ > 970 ~ "nonemp"
   )
 }
@@ -28,7 +29,7 @@ classify_macro = function(meso) {
 }
 
 macro_order = c("farming", "manual", "nonmanual", "nonemp")
-meso_order = c("farmworker", "farmer", "unskilled", "crafts", "nonmanual", "nonemp")
+meso_order = c("farmer", "farmworker", "crafts", "unskilled", "nonmanual", "nonemp")
 
 # --- Modal occupation picker ---
 
@@ -354,170 +355,6 @@ tv_norm = function(mu, nu) {
   0.5 * sum(abs(mu - nu))
 }
 
-# --- Mobility measures ---
-
-d_t = function(data, level_dad, level_son, t = 1) {
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s  = pi_star(P_mat)
-  P_t = P_mat %^% t
-  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
-  log(max(d_i))
-}
-
-d_prime = function(data, level_dad, level_son, t = 1) {
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  P_t = P_mat %^% t
-  n = nrow(P_t)
-  pairs = combn(n, 2)
-  dvals = apply(pairs, 2, function(idx) {
-    i = idx[1]; j = idx[2]
-    tv_norm(P_t[i, ], P_t[j, ])
-  })
-  log(max(dvals))
-}
-
-am = function(data, level_dad, level_son, t = 1) {
-  pi_init = pi_0(data, {{ level_dad }})
-  P_mat   = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s    = pi_star(P_mat)
-  P_t  = P_mat %^% t
-  pi_t = as.numeric(pi_init %*% P_t)
-  log(tv_norm(pi_t, pi_s))
-}
-
-im = function(data, level_dad, level_son, t = 1) {
-  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  pi_s  = pi_star(P_mat)
-  P_t  = P_mat %^% t
-  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
-  log(im_i)
-}
-
-mu_t = function(pi0, P, t = 0) {
-  P = as.matrix(P)
-  if (t == 0) return(as.numeric(pi0))
-  as.numeric(pi0 %*% (P %^% t))
-}
-
-om = function(P, pi0, t) {
-  mu = mu_t(pi0, P, t)
-  1 - sum(mu * diag(P))
-}
-
-sm = function(P, pi0, t) {
-  mu  = mu_t(pi0, P, t)
-  mu1 = as.numeric(mu %*% P)
-  tv_norm(mu, mu1)
-}
-
-# --- Generator identification helpers ---
-
-d_generator = function(P_t, pi_star) {
-  scores = apply(P_t, 1, function(r) tv_norm(r, pi_star))
-  mx = max(scores)
-  i_star = which(abs(scores - mx) < 1e-12)
-  list(classes = rownames(P_t)[i_star], value = mx)
-}
-
-dprime_generator = function(P_t) {
-  n = nrow(P_t)
-  best = -Inf
-  keep = list()
-  for (i in 1:(n-1)) for (j in (i+1):n) {
-    v = tv_norm(P_t[i, ], P_t[j, ])
-    if (v > best + 1e-12) {
-      best = v
-      keep = list(c(i, j))
-    } else if (abs(v - best) <= 1e-12) {
-      keep = append(keep, list(c(i, j)))
-    }
-  }
-  pairs_named = lapply(keep, \(idx) rownames(P_t)[idx])
-  list(pairs = pairs_named, value = best)
-}
-
-identify_generators = function(data, level_dad, level_son, ts = 0:4) {
-  P = p_matrix(data, {{ level_dad }}, {{ level_son }})
-  piS = pi_star(P)
-
-  purrr::map_dfr(ts, function(tt) {
-    P_t = if (tt == 0) diag(nrow(P)) else P %^% tt
-    rownames(P_t) = rownames(P)
-
-    dgen  = d_generator(P_t, piS)
-    dpgen = dprime_generator(P_t)
-
-    tibble::tibble(
-      t               = tt,
-      d_value         = dgen$value,
-      d_classes       = paste(dgen$classes, collapse = " | "),
-      dprime_value    = dpgen$value,
-      dprime_pairs    = paste(
-        vapply(dpgen$pairs, function(p) paste(p, collapse = " vs "), character(1)),
-        collapse = "  |  "
-      )
-    )
-  })
-}
-
-# --- Bootstrap functions ---
-
-boot_measures_by_t = function(data, level_dad, level_son,
-                               ts = 0:4, R = 1000, .seed = NULL) {
-  if (!is.null(.seed)) set.seed(.seed)
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-
-  compute_all = function(P, pi0, pi_s) {
-    Pt = diag(nrow(P))
-    purrr::map_dfr(ts, function(tt) {
-      if (tt > 0) Pt <<- Pt %*% P
-      pi_t   = as.numeric(pi0 %*% Pt)
-      n      = nrow(Pt)
-      pairs  = combn(n, 2)
-      tibble::tibble(
-        t       = tt,
-        d       = log(max(apply(Pt, 1, function(r) tv_norm(r, pi_s)))),
-        d_prime = log(max(apply(pairs, 2, function(i) tv_norm(Pt[i[1],], Pt[i[2],])))),
-        AM      = log(tv_norm(pi_t, pi_s))
-      )
-    })
-  }
-
-  # point estimates on the full data
-  P_hat   = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
-  pi0_hat = as.numeric(pi_0(data, !!dad_sym))
-  piS_hat = pi_star(P_hat)
-  point_df = compute_all(P_hat, pi0_hat, piS_hat)
-
-  # bootstrap
-  N = nrow(data)
-  boots = replicate(R, {
-    idx   = sample.int(N, N, replace = TRUE)
-    P_b   = p_matrix(data[idx, ], !!dad_sym, !!son_sym, matrix = TRUE)
-    pi0_b = as.numeric(pi_0(data[idx, ], !!dad_sym))
-    piS_b = pi_star(P_b)
-    as.matrix(compute_all(P_b, pi0_b, piS_b)[, c("d", "d_prime", "AM")])
-  }, simplify = FALSE)
-
-  arr = simplify2array(boots)
-
-  measure_nms = c("d", "d_prime", "AM")
-  purrr::map_dfr(seq_along(ts), function(i_t) {
-    purrr::map_dfr(seq_along(measure_nms), function(m_idx) {
-      v = arr[i_t, m_idx, ]
-      tibble::tibble(
-        measure = measure_nms[m_idx],
-        t       = ts[i_t],
-        est     = point_df[[measure_nms[m_idx]]][i_t],
-        se      = sd(v, na.rm = TRUE),
-        lo      = quantile(v, 0.025, na.rm = TRUE, names = FALSE),
-        hi      = quantile(v, 0.975, na.rm = TRUE, names = FALSE)
-      )
-    })
-  }) |> dplyr::mutate(dt_t = est * t)
-}
-
 # --- Bootstrap SE for transition matrix cells ---
 #
 # WHY THIS REPLACES THE OLD boot_pmatrix_ci:
@@ -592,146 +429,4 @@ boot_pmatrix_ci = function(
     est = as.vector(P_hat),
     se  = as.vector(se_mat)
   )
-}
-
-boot_im_by_t = function(data, level_dad, level_son, ts = 0:4, R = 1000, .seed = NULL) {
-  if (!is.null(.seed)) set.seed(.seed)
-
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-
-  P0   = p_matrix(data, !!dad_sym, !!son_sym, matrix = TRUE)
-  piS0 = pi_star(P0)
-  rowlabs = rownames(P0)
-
-  Pt0 = diag(nrow(P0))
-  point_by_t = purrr::map(ts, function(tt) {
-    if (tt > 0) Pt0 <<- Pt0 %*% P0
-    im_vals = apply(Pt0, 1, function(r) tv_norm(r, piS0))
-    tibble::tibble(t = tt, origin = rowlabs, est = log(im_vals))
-  }) |> dplyr::bind_rows()
-
-  N = nrow(data)
-  boot_once = function() {
-    idx = sample.int(N, N, replace = TRUE)
-    db  = data[idx, , drop = FALSE]
-    P   = p_matrix(db, !!dad_sym, !!son_sym, matrix = TRUE)
-    piS = pi_star(P)
-
-    Pt = diag(nrow(P))
-    out_list = vector("list", length(ts))
-    for (k in seq_along(ts)) {
-      if (ts[k] > 0) Pt = Pt %*% P
-      im_vals = apply(Pt, 1, function(r) tv_norm(r, piS))
-      out_list[[k]] = log(im_vals)
-    }
-    do.call(cbind, out_list)
-  }
-
-  boots = replicate(R, boot_once(), simplify = FALSE)
-  arr = simplify2array(boots)
-  dimnames(arr) = list(origin = rowlabs, t = as.character(ts), rep = NULL)
-
-  alpha = 0.05
-  summ = lapply(ts, function(tt) {
-    a2 = arr[, as.character(tt), , drop = FALSE]
-    draws_mat = drop(a2)
-    se = apply(draws_mat, 1, sd, na.rm = TRUE)
-    lo = apply(draws_mat, 1, quantile, probs = alpha/2, na.rm = TRUE, names = FALSE)
-    hi = apply(draws_mat, 1, quantile, probs = 1 - alpha/2, na.rm = TRUE, names = FALSE)
-    tibble::tibble(t = tt, origin = rowlabs, se = unname(se), lo = unname(lo), hi = unname(hi))
-  }) |> dplyr::bind_rows()
-
-  dplyr::left_join(point_by_t, summ, by = c("t", "origin"))
-}
-
-# --- Bootstrap SE for EM/SM mobility curves ---
-#
-# WHY THIS REPLACES THE OLD mobility_curve_with_boot:
-#   Same root problem as boot_pmatrix_ci: the previous version resampled the
-#   pre-weighted dataset without re-estimating propensity scores, understating
-#   SEs — especially for EM and SM, which depend on the marginal distributions
-#   pi_0 and pi_star and are therefore sensitive to weight variance.
-#
-# SCOPE:
-#   Returns SEs for EM and SM only. OM is excluded: the paper's analytical
-#   contribution is the EM/SM decomposition, and OM is recoverable as EM + SM
-#   at the caller level if needed. Dropping OM halves the output width and
-#   avoids implying OM has independent inferential content here.
-#   No CIs are returned — same reasoning as boot_pmatrix_ci.
-#
-# INPUTS:
-#   data, df_linked, df_full — same roles as in boot_pmatrix_ci (see above).
-#
-# DESIGN CHOICES:
-#   - compute_em_sm() is a closure that captures dad_sym/son_sym. It is defined
-#     inside the outer function so the bootstrap loop can call it without
-#     passing symbols explicitly.
-#   - pi_0() uses <<- to look up macro_levels/meso_levels in the calling
-#     environment. The closure keeps those lookups in scope.
-#   - The pre-generated index matrix (inds_mat) from the previous version is
-#     replaced with a simpler replicate() loop. The index matrix was a
-#     micro-optimisation that added complexity without measurable speed gain
-#     at R = 500.
-#
-# ASSUMPTIONS (shared with boot_pmatrix_ci):
-#   1. df_linked already has region and education columns.
-#   2. Sparse resample GLM failures are not guarded against; monitor for
-#      convergence warnings on the first run.
-#   3. R = 500 is sufficient for SE estimation.
-
-mobility_curve_with_boot = function(
-    data, level_dad, level_son,
-    df_linked, df_full,
-    ts = 1:5, R = 500, .seed = NULL) {
-
-  if (!is.null(.seed)) set.seed(.seed)
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
-  N = nrow(df_linked)
-
-  # Inner stat function: given a weighted data frame, return EM and SM for
-  # each t. Called once for the point estimate and once per bootstrap draw.
-  compute_em_sm = function(df) {
-    P   = p_matrix(df, !!dad_sym, !!son_sym, matrix = TRUE)
-    pi0 = as.numeric(pi_0(df, !!dad_sym))
-
-    purrr::map_dfr(ts, function(tt) {
-      # mu is the marginal distribution of fathers' occupations at generation t.
-      # At t = 0 it equals pi_0; for t > 0 it advances one step through P.
-      mu  = as.numeric(pi0 %*% (if (tt == 0) diag(nrow(P)) else P %^% tt))
-      mu1 = as.numeric(mu %*% P)           # one step forward from mu
-      om_v = 1 - sum(mu * diag(P))         # overall mobility at t
-      sm_v = tv_norm(mu, mu1)              # structural component
-      tibble::tibble(t = tt, EM = om_v - sm_v, SM = sm_v, OM = om_v)
-    })
-  }
-
-  # Point estimate: run full pipeline on complete linked sample.
-  w_full   = compute_weights(df_linked, df_full)
-  d_full   = trim_weights_top1(w_full$data)
-  point_df = compute_em_sm(d_full)
-
-  boot_once = function() {
-    idx = sample.int(N, N, replace = TRUE)
-    w_b = compute_weights(df_linked[idx, ], df_full)
-    d_b = trim_weights_top1(w_b$data)
-    as.matrix(compute_em_sm(d_b)[, c("EM", "SM", "OM")])   # nT × 3
-  }
-
-  boots = parallel::mclapply(seq_len(R), function(i) boot_once(),            
-                             mc.cores = parallel::detectCores() - 1)
-  arr   = simplify2array(boots)   # nT × 2 × R
-
-  purrr::map_dfr(seq_along(ts), function(i_t) {
-    # draws is a 3 × R matrix; rows correspond to EM, SM, OM respectively.
-    draws = arr[i_t, , , drop = FALSE]
-    draws = matrix(draws, nrow = 3, ncol = R)
-    tibble::tibble(
-      t       = ts[i_t],
-      measure = c("EM", "SM", "OM"),
-      est     = as.numeric(point_df[i_t, c("EM", "SM", "OM")]),
-      se      = apply(draws, 1, sd, na.rm = TRUE)
-    )
-  })
 }

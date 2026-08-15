@@ -173,4 +173,4 @@ aian_merged = aian_clean |>
 
 cat("\nFinal analysis sample:", nrow(aian_merged), "father-son pairs\n")
 
-write_csv(aian_merged, "data/aian_merged.csv")
+saveRDS(aian_merged, "data/aian_merged.rds")

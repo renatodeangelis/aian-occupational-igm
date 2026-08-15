@@ -16,7 +16,7 @@ library(jtools)
 
 source("code/utils.R")
 
-data = read_csv("data/aian_weighted.csv") |>
+data = readRDS("data/aian_weighted.rds") |>
   mutate(w_atc_norm = w_trim_norm)
 
 aian_full = readRDS("data/aian_full.rds")
@@ -144,7 +144,7 @@ ts = 1:4
 
 # Bootstrap cache — set force_rerun = TRUE to discard cache and re-estimate.
 # Delete individual files from cache/ to selectively re-run one bootstrap.
-# Note: cache is not auto-invalidated if aian_weighted.csv changes; delete
+# Note: cache is not auto-invalidated if aian_weighted.rds changes; delete
 # cache/ manually after re-running weighting.R.
 force_rerun <- FALSE
 cache_dir   <- "cache"
@@ -657,24 +657,24 @@ print(phi_tbl)
 dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 
 # Transition matrix heatmaps (wide: P matrix + pi_0 + pi*)
-ggsave("output/figures/pmat_macro.pdf",        combined_plot_macro,      width = 14, height = 6)
-ggsave("output/figures/pmat_meso.pdf",         combined_plot_meso,       width = 14, height = 6)
-ggsave("output/figures/pmat_alt_macro.pdf",    combined_plot_macro_alt,  width = 14, height = 6)
-ggsave("output/figures/pmat_main_vs_alt.pdf",  combined_main_vs_alt,     width = 14, height = 12)
+ggsave("output/figures/pmat_macro.png",        combined_plot_macro,      width = 14, height = 6,  dpi = 200)
+ggsave("output/figures/pmat_meso.png",         combined_plot_meso,       width = 14, height = 6,  dpi = 200)
+ggsave("output/figures/pmat_alt_macro.png",    combined_plot_macro_alt,  width = 14, height = 6,  dpi = 200)
+ggsave("output/figures/pmat_main_vs_alt.png",  combined_main_vs_alt,     width = 14, height = 12, dpi = 200)
 
 # EM/SM mobility curves
-ggsave("output/figures/om_plot.pdf",           om_plot,         width = 8,  height = 6)
+ggsave("output/figures/om_plot.png",           om_plot,         width = 8,  height = 6,  dpi = 200)
 
 # Regional maps
-ggsave("output/figures/map_sm.pdf",            sm_plot,         width = 10, height = 6)
-ggsave("output/figures/map_em.pdf",            em_plot,         width = 10, height = 6)
-ggsave("output/figures/map_p_manual.pdf",      p_manual_plot,   width = 10, height = 6)
-ggsave("output/figures/map_p_farming.pdf",     p_farming_plot,  width = 10, height = 6)
-ggsave("output/figures/map_p_nonemp.pdf",      p_nonemp_plot,   width = 10, height = 6)
+ggsave("output/figures/map_sm.png",            sm_plot,         width = 10, height = 6,  dpi = 200)
+ggsave("output/figures/map_em.png",            em_plot,         width = 10, height = 6,  dpi = 200)
+ggsave("output/figures/map_p_manual.png",      p_manual_plot,   width = 10, height = 6,  dpi = 200)
+ggsave("output/figures/map_p_farming.png",     p_farming_plot,  width = 10, height = 6,  dpi = 200)
+ggsave("output/figures/map_p_nonemp.png",      p_nonemp_plot,   width = 10, height = 6,  dpi = 200)
 
 # Alt regional maps
-ggsave("output/figures/map_sm_alt.pdf",        sm_plot_alt,        width = 10, height = 6)
-ggsave("output/figures/map_em_alt.pdf",        em_plot_alt,        width = 10, height = 6)
-ggsave("output/figures/map_p_manual_alt.pdf",  p_manual_plot_alt,  width = 10, height = 6)
-ggsave("output/figures/map_p_farming_alt.pdf", p_farming_plot_alt, width = 10, height = 6)
-ggsave("output/figures/map_p_nonemp_alt.pdf",  p_nonemp_plot_alt,  width = 10, height = 6)
+ggsave("output/figures/map_sm_alt.png",        sm_plot_alt,        width = 10, height = 6, dpi = 200)
+ggsave("output/figures/map_em_alt.png",        em_plot_alt,        width = 10, height = 6, dpi = 200)
+ggsave("output/figures/map_p_manual_alt.png",  p_manual_plot_alt,  width = 10, height = 6, dpi = 200)
+ggsave("output/figures/map_p_farming_alt.png", p_farming_plot_alt, width = 10, height = 6, dpi = 200)
+ggsave("output/figures/map_p_nonemp_alt.png",  p_nonemp_plot_alt,  width = 10, height = 6, dpi = 200)
