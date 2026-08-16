@@ -3,7 +3,6 @@
 ################################################################################
 
 library(dplyr)
-library(readr)
 library(tidyr)
 library(ggplot2)
 library(patchwork)
@@ -18,7 +17,7 @@ source("code/utils.R")
 
 # Employment-only sample: both father and son have a valid occ code (occ <= 970).
 # Weights are re-normalized within the filtered sample.
-data = read_csv("data/aian_weighted.csv") |>
+data = readRDS("data/aian_weighted.rds") |>
   mutate(w_atc_norm = w_trim_norm) |>
   filter(occ_pop <= 970, occ_son <= 970) |>
   mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
@@ -147,17 +146,17 @@ desc_educd     = weighted_prop_table(data, education)
 ts = 1:4
 
 # Bootstrap cache — set force_rerun = TRUE to discard cache and re-estimate.
-force_rerun <- FALSE
-cache_dir   <- "cache/employed"
+force_rerun = FALSE
+cache_dir   = "cache/employed"
 dir.create(cache_dir, recursive = TRUE, showWarnings = FALSE)
 
-cache_load <- function(name, expr, force = force_rerun) {
-  path <- file.path(cache_dir, paste0(name, ".rds"))
+cache_load = function(name, expr, force = force_rerun) {
+  path = file.path(cache_dir, paste0(name, ".rds"))
   if (!force && file.exists(path)) {
     message("Loading cached: ", name)
     return(readRDS(path))
   }
-  result <- eval(expr, envir = parent.frame())
+  result = eval(expr, envir = parent.frame())
   saveRDS(result, path)
   result
 }
@@ -579,56 +578,6 @@ print(round(P_2544, 3))
 cat("\nMain macro transition matrix (employed):\n")
 print(round(P_macro_global, 3))
 
-################################################################################
-####################### 11. UNIDIFF BY REGION #################################
-################################################################################
-
-library(gnm)
-
-region_long = data |>
-  count(region, macro_pop, macro_son, wt = w_atc_norm, name = "freq") |>
-  mutate(
-    region    = factor(region),
-    macro_pop = factor(macro_pop, levels = macro_levels),
-    macro_son = factor(macro_son, levels = macro_levels)
-  )
-
-unidiff_null = gnm(
-  freq ~ region + macro_pop + macro_son,
-  data = region_long, family = poisson, trace = FALSE
-)
-
-unidiff_mod = gnm(
-  freq ~ region + macro_pop + macro_son +
-         Mult(region, macro_pop:macro_son),
-  data = region_long, family = poisson, trace = FALSE
-)
-
-unidiff_sat = gnm(
-  freq ~ region + macro_pop + macro_son + region:(macro_pop:macro_son),
-  data = region_long, family = poisson, trace = FALSE
-)
-
-cat("\n--- UNIDIFF model fit (employed) ---\n")
-cat(sprintf("Null (indep):  df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_null), deviance(unidiff_null)))
-cat(sprintf("UNIDIFF:       df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_mod),  deviance(unidiff_mod)))
-cat(sprintf("Saturated:     df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_sat),  deviance(unidiff_sat)))
-
-phi_idx = pickCoef(unidiff_mod, "Exp\\(region\\)")
-phi_est = coef(unidiff_mod)[phi_idx]
-phi_se  = sqrt(diag(vcov(unidiff_mod)))[phi_idx]
-
-phi_tbl = tibble(
-  region = levels(region_long$region),
-  phi    = round(exp(phi_est), 3),
-  se     = round(phi_se, 3)
-)
-
-cat("\n--- UNIDIFF phi parameters by region (employed) ---\n")
-print(phi_tbl)
 
 ################################################################################
 ############################# 12. SAVE FIGURES ################################

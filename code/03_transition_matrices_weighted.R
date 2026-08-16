@@ -144,17 +144,17 @@ ts = 1:4
 # Delete individual files from cache/ to selectively re-run one bootstrap.
 # Note: cache is not auto-invalidated if aian_weighted.rds changes; delete
 # cache/ manually after re-running weighting.R.
-force_rerun <- FALSE
-cache_dir   <- "cache"
+force_rerun = FALSE
+cache_dir   = "cache"
 dir.create(cache_dir, showWarnings = FALSE)
 
-cache_load <- function(name, expr, force = force_rerun) {
-  path <- file.path(cache_dir, paste0(name, ".rds"))
+cache_load = function(name, expr, force = force_rerun) {
+  path = file.path(cache_dir, paste0(name, ".rds"))
   if (!force && file.exists(path)) {
     message("Loading cached: ", name)
     return(readRDS(path))
   }
-  result <- eval(expr, envir = parent.frame())
+  result = eval(expr, envir = parent.frame())
   saveRDS(result, path)
   result
 }
@@ -480,66 +480,6 @@ print(round(P_2544, 3))
 cat("\nMain macro transition matrix:\n")
 print(round(P_macro_global, 3))
 
-################################################################################
-####################### 11. UNIDIFF BY REGION #################################
-################################################################################
-
-# Tests whether regional variation in father-son association is a difference
-# in degree (phi_k varies, pattern fixed) or kind (pattern changes).
-# Macro 4x4 used to avoid sparse cells in smaller regions.
-# Weighted cell frequencies passed as response; Poisson family is valid with
-# fractional counts — coefficient estimates are consistent.
-
-library(gnm)
-
-region_long = data |>
-  count(region, macro_pop, macro_son, wt = w_atc_norm, name = "freq") |>
-  mutate(
-    region    = factor(region),
-    macro_pop = factor(macro_pop, levels = macro_order),
-    macro_son = factor(macro_son, levels = macro_order)
-  )
-
-# Conditional independence baseline (no association layer)
-unidiff_null = gnm(
-  freq ~ region + macro_pop + macro_son,
-  data = region_long, family = poisson, trace = FALSE
-)
-
-# UNIDIFF: single multiplier phi_k scales a common association pattern per region
-unidiff_mod = gnm(
-    freq ~ region + macro_pop + macro_son +                                  
-           Mult(region, macro_pop:macro_son),
-    data = region_long, family = poisson, trace = FALSE                      
-  )                                                         
-
-# Saturated association (region-specific full interaction — no constraint)
-unidiff_sat = gnm(
-  freq ~ region + macro_pop + macro_son + region:(macro_pop:macro_son),
-  data = region_long, family = poisson, trace = FALSE
-)
-
-cat("\n--- UNIDIFF model fit ---\n")
-cat(sprintf("Null (indep):  df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_null), deviance(unidiff_null)))
-cat(sprintf("UNIDIFF:       df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_mod),  deviance(unidiff_mod)))
-cat(sprintf("Saturated:     df = %d,  deviance = %.2f\n",
-            df.residual(unidiff_sat),  deviance(unidiff_sat)))
-
-# Extract phi_k (the UNIDIFF multipliers, one per region)
-phi_idx = pickCoef(unidiff_mod, "Exp\\(region\\)")
-phi_est = coef(unidiff_mod)[phi_idx]
-phi_se  = sqrt(diag(vcov(unidiff_mod)))[phi_idx]
-
-phi_tbl = tibble(
-  region = levels(region_long$region),
-  phi    = round(exp(phi_est), 3),   # exponentiate: phi > 1 = stronger association
-  se     = round(phi_se, 3)
-)
-
-cat("\n--- UNIDIFF phi parameters by region (ref = first level) ---\n")
-print(phi_tbl)
 
 ################################################################################
 ############################# 12. SAVE FIGURES ################################

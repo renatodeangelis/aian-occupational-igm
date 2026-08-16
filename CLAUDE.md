@@ -39,6 +39,10 @@ No build automation exists. Run scripts from RStudio or via `Rscript` from the r
 
 **Regional stratification:** 12 U.S. regions (basin, cali, lakes, midwest, nc, ne, nw, ok, plains, prairie, south, sw).
 
+## Code Style
+
+- Use `=` for assignment throughout (not `<-`)
+
 ## General Conduct
 
 - Do not offer historical or factual claims as supporting context unless they can be verified from the code, data, or user-provided materials — if uncertain, say so rather than confabulating

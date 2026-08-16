@@ -55,7 +55,7 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
       birthyr_pop = first(birthyr_pop),
       birthyr_son = first(birthyr_son),
       meso = {
-        pool <- if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
+        pool = if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
           meso[!is.na(meso) & meso != "nonemp"]
         else
           meso[!is.na(meso)]
