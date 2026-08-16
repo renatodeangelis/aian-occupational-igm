@@ -131,40 +131,16 @@ p_mat_meso = cache_load("p_mat_meso_slides", quote(
                   df_linked = data, df_full = aian_full, R = R_slides, .seed = 123)
 ))
 
-# ── Alt dataset ────────────────────────────────────────────────────────────────
-data_alt = data |>
-  select(-macro_pop, -macro_son, -meso_pop, -meso_son) |>
-  rename(macro_pop = macro_pop_alt, macro_son = macro_son_alt,
-         meso_pop  = meso_pop_alt,  meso_son  = meso_son_alt)
-
-message("Running macro-alt bootstrap …")
-p_mat_macro_alt = cache_load("p_mat_macro_alt_slides", quote(
-  boot_pmatrix_ci(data_alt, macro_pop, macro_son,
-                  df_linked = data_alt, df_full = aian_full, R = R_slides, .seed = 123)
-))
-
-message("Running meso-alt bootstrap …")
-p_mat_meso_alt = cache_load("p_mat_meso_alt_slides", quote(
-  boot_pmatrix_ci(data_alt, meso_pop, meso_son,
-                  df_linked = data_alt, df_full = aian_full, R = R_slides, .seed = 123)
-))
-
 # ── Stationary distributions ───────────────────────────────────────────────────
 pi0_macro     = recode_occ_vec(pi_0(data,     macro_pop))
 pi0_meso      = recode_occ_vec(pi_0(data,     meso_pop))
-pi0_macro_alt = recode_occ_vec(pi_0(data_alt, macro_pop))
-pi0_meso_alt  = recode_occ_vec(pi_0(data_alt, meso_pop))
 
 steady_macro     = recode_occ_vec(pi_star(p_matrix(data,     macro_pop, macro_son, TRUE)))
 steady_meso      = recode_occ_vec(pi_star(p_matrix(data,     meso_pop,  meso_son,  TRUE)))
-steady_macro_alt = recode_occ_vec(pi_star(p_matrix(data_alt, macro_pop, macro_son, TRUE)))
-steady_meso_alt  = recode_occ_vec(pi_star(p_matrix(data_alt, meso_pop,  meso_son,  TRUE)))
 
 # ── Recode bootstrap data frames ───────────────────────────────────────────────
 p_mat_macro_r     = recode_occ_df(p_mat_macro,     macro_pop, macro_son)
 p_mat_meso_r      = recode_occ_df(p_mat_meso,      meso_pop,  meso_son)
-p_mat_macro_alt_r = recode_occ_df(p_mat_macro_alt, macro_pop, macro_son)
-p_mat_meso_alt_r  = recode_occ_df(p_mat_meso_alt,  meso_pop,  meso_son)
 
 # ── Assemble combined plots ────────────────────────────────────────────────────
 make_combined = function(boot_df, pi0, steady, dad_var, son_var,
@@ -184,25 +160,12 @@ combined_macro     = make_combined(p_mat_macro_r,     pi0_macro,     steady_macr
 combined_meso      = make_combined(p_mat_meso_r,      pi0_meso,      steady_meso,
                                     meso_pop,  meso_son,
                                     levels = meso_level_order, text_size = 4)
-combined_macro_alt = make_combined(p_mat_macro_alt_r, pi0_macro_alt, steady_macro_alt,
-                                    macro_pop, macro_son,
-                                    levels = macro_level_order)
-combined_meso_alt  = make_combined(p_mat_meso_alt_r,  pi0_meso_alt,  steady_meso_alt,
-                                    meso_pop,  meso_son,
-                                    levels = meso_level_order, text_size = 4)
 
 # ── EM/SM mobility curves: macro vs macro-alt ─────────────────────────────────
 message("Running macro EM/SM bootstrap …")
 macro_om = cache_load("macro_om_slides", quote(
   mobility_curve_with_boot(data, macro_pop, macro_son,
                            df_linked = data, df_full = aian_full,
-                           ts = 0:4, R = 100, .seed = 123)
-))
-
-message("Running macro-alt EM/SM bootstrap …")
-macro_alt_om = cache_load("macro_alt_om_slides", quote(
-  mobility_curve_with_boot(data_alt, macro_pop, macro_son,
-                           df_linked = data_alt, df_full = aian_full,
                            ts = 0:4, R = 100, .seed = 123)
 ))
 
@@ -248,5 +211,3 @@ dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 ggsave("output/figures/overall_mobility.png", om_plot,            width = 10, height = 7, dpi = 200)
 ggsave("output/figures/trans_macro.png",     combined_macro,     width = 10, height = 7, dpi = 200)
 ggsave("output/figures/trans_meso.png",      combined_meso,      width = 10, height = 7, dpi = 200)
-ggsave("output/figures/trans_macro_alt.png", combined_macro_alt, width = 10, height = 7, dpi = 200)
-ggsave("output/figures/trans_meso_alt.png",  combined_meso_alt,  width = 10, height = 7, dpi = 200)
