@@ -88,60 +88,22 @@ aian_age = aian_clean |>
     spread_mad = median(abs(c_across(starts_with("birthyr")) - birth_median), na.rm = TRUE)) |>
   ungroup()
 
-modal_occ_pick = pick_modal_occ(aian_clean, aian_age, prefer_employed = TRUE, empstatd_tiebreak = FALSE) |>
-  rename(occ_pop = occ, picked_year = year)
-
-modal_occ_pick_attach = pick_modal_occ(aian_clean, aian_age, prefer_employed = FALSE, empstatd_tiebreak = FALSE) |>
-  rename(occ_pop_alt = occ, picked_year_alt = year) |>
-  select(-birthyr_pop)
+modal_meso_pop = pick_modal_meso(aian_clean, aian_age, prefer_employed = TRUE, empstatd_tiebreak = FALSE) |>
+  rename(meso_pop = meso, picked_year = year)
 
 aian_merged = aian_clean |>
-  left_join(modal_occ_pick, by = "pid") |>
-  left_join(modal_occ_pick_attach, by = "pid") |>
+  left_join(modal_meso_pop, by = "pid") |>
   left_join(aian_age |> select(pid, birthyr_spread = spread, spread_mad), by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
   select(-pid, -starts_with("age"), -starts_with("occ1950_pop")) |>
-  filter(!is.na(occ_pop)) |>
-  (\(x) { cat("After missing occ_pop drop:", nrow(x), "father-son pairs\n"); x })() |>
+  filter(!is.na(meso_pop)) |>
+  (\(x) { cat("After missing meso_pop drop:", nrow(x), "father-son pairs\n"); x })() |>
   filter(is.na(spread_mad) | spread_mad <= 4) |>
   (\(x) { cat("After spread filter (MAD <= 4):", nrow(x), "father-son pairs\n"); x })() |>
   mutate(spread_flag = !is.na(spread_mad) & spread_mad > 2,
-         attachment_level_son = case_when(
-           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 == 0  ~ 1L,
-           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 <= 13 ~ 2L,
-           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34) & wkswork1_1940 <= 26 ~ 3L,
-           occ_son <= 970 & empstatd_1940 %in% c(21, 22, 31, 32, 33, 34)                       ~ 4L,
-           .default = NA_integer_),
-         attachment_level_pop = {
-           ep = case_when(
-             picked_year_alt == 1910 ~ empstatd_pop_1910,
-             picked_year_alt == 1930 ~ empstatd_pop_1930,
-             picked_year_alt == 1940 ~ empstatd_pop_1940,
-             .default = NA_integer_
-           )
-           lf = if_else(picked_year_alt == 1920, labforce_pop_1920, NA_integer_)
-           case_when(
-             occ_pop_alt <= 970 & ep %in% c(20,21,22,30,31,32,33,34) ~ 1L,
-             occ_pop_alt <= 970 & is.na(ep) & lf == 1          ~ 2L,
-             .default = NA_integer_
-           )
-         },
-         meso_pop = classify_meso(occ_pop),
          macro_pop = classify_macro(meso_pop),
          meso_son = classify_meso(occ_son),
-         macro_son = classify_macro(meso_son),
-         # Alt father classification: reclassify low-attachment fathers to nonemp.
-         # ORDER-SENSITIVE: occ_pop_alt on the RHS refers to the raw no-pref pick
-         # from the join; attachment_level_pop must be defined earlier in this
-         # same mutate() call. Do not reorder these expressions.
-         occ_pop_alt   = if_else(!is.na(attachment_level_pop), 999L, occ_pop_alt),
-         meso_pop_alt  = classify_meso(occ_pop_alt),
-         macro_pop_alt = classify_macro(meso_pop_alt),
-         # Alt son classification: reclassify any seeking-work empstatd to nonemp
-         # regardless of weeks worked (maximal attachment filter, empstatd-only)
-         occ_son_alt  = if_else(!is.na(attachment_level_son), 999L, occ_son),
-         meso_son_alt = classify_meso(occ_son_alt),
-         macro_son_alt = classify_macro(meso_son_alt)) |>
+         macro_son = classify_macro(meso_son)) |>
   mutate(across(starts_with("macro_"),
                 ~ factor(.x, levels = macro_order, ordered = TRUE)),
          across(starts_with("meso_"),
@@ -159,18 +121,17 @@ aian_merged = aian_clean |>
   relocate(birthyr_spread, .after = birthyr_pop) |>
   relocate(spread_mad, .after = birthyr_spread) |>
   relocate(spread_flag, .after = spread_mad) |>
-  relocate(attachment_level_son, .after = spread_flag) |>
-  relocate(attachment_level_pop, .after = attachment_level_son) |>
-  relocate(occ_pop_alt, picked_year_alt, .after = occ_pop) |>
-  relocate(occ_son_alt, .after = occ_son) |>
-  relocate(starts_with("macro_pop"), .after = occ_pop_alt) |>                
-  relocate(starts_with("meso_pop"), .after = macro_pop) |>   
-  relocate(starts_with("macro_son"), .after = occ_son_alt) |>
+  relocate(meso_pop, .after = picked_year) |>
+  relocate(macro_pop, .after = meso_pop) |>
+  relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son) |>
   relocate(lit_son, .after = educd_1940) |>
   relocate(lit_pop, .after = educd_pop_1940) |>
   relocate(starts_with("w_parent"), .after = last_col())
 
 cat("\nFinal analysis sample:", nrow(aian_merged), "father-son pairs\n")
+
+cat("meso_pop values:", paste(sort(unique(as.character(aian_merged$meso_pop))), collapse = ", "), "\n")
+stopifnot(all(aian_merged$meso_pop %in% meso_order))
 
 saveRDS(aian_merged, "data/aian_merged.rds")

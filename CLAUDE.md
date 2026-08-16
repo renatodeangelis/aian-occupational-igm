@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an R-based empirical research project analyzing intergenerational occupational mobility (IGM) of Native American (AIAN) men using linked U.S. Census data from 1900–1940. It produces a paper estimating weighted transition matrices and mobility statistics.
+This is an R-based empirical research project analyzing intergenerational occupational mobility (IGM) of Native American (AIAN) men using linked U.S. Census data from 1910–1940. It produces a paper estimating weighted transition matrices and mobility statistics.
 
 ## Running the Code
 
@@ -42,14 +42,11 @@ No build automation exists. Run scripts from RStudio or via `Rscript` from the r
 ## General Conduct
 
 - Do not offer historical or factual claims as supporting context unless they can be verified from the code, data, or user-provided materials — if uncertain, say so rather than confabulating
-
-## Known Methodological Issues
-
-`code/methods-notes.md` documents 20+ outstanding issues.
+-Use
 
 ## Data
 
-- `data/aian_merged.csv` — Cleaned father-son linked pairs (output of step 1)
-- `data/aian_weighted.csv` — Weighted analysis dataset (output of step 2)
-- `data/res_counties.csv` — Reservation county reference for regional classification
+- `data/aian_merged.rds` — Cleaned father-son linked pairs (output of step 1)
+- `data/aian_weighted.rds` — Weighted analysis dataset (output of step 2)
+- `data/res_counties.rds` — Reservation county reference for regional classification
 - Raw data is loaded from a Dropbox URL in `cleaning-script.R` and is not versioned here

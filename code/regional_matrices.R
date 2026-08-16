@@ -11,13 +11,10 @@ library(expm)
 
 source("code/utils.R")
 
-data = read_csv("data/aian_weighted.csv") |>
-  mutate(w_atc_norm = w_trim_norm) |>
-  filter(occ_pop <= 970, occ_son <= 970) |>
-  mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
+regional_weighted = readRDS("data/aian_regional_weighted.rds")
 
-macro_levels = setdiff(macro_order, "nonemp")  # pi_0() reads this from the caller environment
-meso_levels  = setdiff(meso_order,  "nonemp")
+macro_levels = macro_order  # pi_0() reads this from the caller environment
+meso_levels  = meso_order
 
 ################################################################################
 # PLOT HELPERS
@@ -80,18 +77,18 @@ plot_pi_column_simple = function(vec, title_expr, levels = NULL) {
 # PER-REGION COMPUTATION AND PLOTTING
 ################################################################################
 
-macro_level_order = c("nonmanual", "manual", "farming")
-meso_level_order  = c("nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+macro_level_order = c("nonemp", "nonmanual", "manual", "farming")
+meso_level_order  = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
 
-regions = sort(na.omit(unique(data$region)))
+regions = names(regional_weighted)
 
 cat(sprintf("Regions found: %s\n", paste(regions, collapse = ", ")))
 
 dir.create("output/figures/regional", recursive = TRUE, showWarnings = FALSE)
+region_results = list()
 
 for (reg in regions) {
-  df_reg = data |>
-    filter(region == reg) |>
+  df_reg = regional_weighted[[reg]] |>
     mutate(w_atc_norm = w_atc_norm / sum(w_atc_norm) * n())
 
   cat(sprintf("\n--- %s (n = %d) ---\n", reg, nrow(df_reg)))
@@ -101,9 +98,19 @@ for (reg in regions) {
   pi0    = pi_0(df_reg, macro_pop)
   pistar = pi_star(P_mat)
 
+  om_val = om(P_mat, pi0, t = 1)
+  sm_val = sm(P_mat, pi0, t = 1)
+  em_val = om_val - sm_val
+
   cat("P (macro):\n"); print(round(P_mat, 3))
   cat("pi_0 (macro):  "); print(round(pi0, 3))
   cat("pi*  (macro):  "); print(round(pistar, 3))
+  cat(sprintf("OM=%.3f  SM=%.3f  EM=%.3f\n", om_val, sm_val, em_val))
+
+  region_results[[reg]] = list(
+    P_macro = P_mat, pi0 = pi0, pistar = pistar,
+    om = om_val, sm = sm_val, em = em_val
+  )
 
   P_df = tibble(
     macro_pop = rep(rownames(P_mat), times = ncol(P_mat)),
@@ -153,4 +160,7 @@ for (reg in regions) {
   )
 }
 
+dir.create("output", showWarnings = FALSE)
+saveRDS(region_results, "output/regional_matrices.rds")
 cat("\nDone. PNGs saved to output/figures/regional/\n")
+cat("Matrices saved to output/regional_matrices.rds\n")

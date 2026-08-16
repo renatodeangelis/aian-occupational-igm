@@ -131,9 +131,7 @@ desc_main = data |>
 desc_region = weighted_prop_table(data, region) |>
   mutate(prop = round(prop, 1))
 desc_macro_pop = weighted_prop_table(data, macro_pop)
-desc_macro_pop_alt = weighted_prop_table(data, macro_pop_alt)
 desc_macro_son = weighted_prop_table(data, macro_son)
-desc_macro_son_alt = weighted_prop_table(data, macro_son_alt)
 desc_educd = weighted_prop_table(data, education)
 
 ################################################################################
@@ -421,115 +419,6 @@ for (res in cohort_results) {
 }
 
 ################################################################################
-##################### 8. ALT MATRIX (ATTACHMENT-FIRST) ########################
-################################################################################
-
-# Men with a valid occ code but no recorded labor market activity are
-# reclassified to nonemp, applied symmetrically to fathers and sons.
-# data_alt renames the alt columns into the main column slots so all
-# existing functions (pi_0, p_matrix, compute_mobility_stats) work unchanged.
-data_alt = data |>
-  select(-macro_pop, -macro_son, -meso_pop, -meso_son) |>
-  rename(
-    macro_pop = macro_pop_alt,
-    macro_son = macro_son_alt,
-    meso_pop  = meso_pop_alt,
-    meso_son  = meso_son_alt
-  )
-
-## Alt transition matrices ----
-
-p_mat_macro_alt = cache_load("p_mat_macro_alt", quote(
-  boot_pmatrix_ci(data_alt, macro_pop, macro_son,
-                  df_linked = data_alt, df_full = aian_full,
-                  R = 500, .seed = 123)
-))
-
-pi0_vec_macro_alt  = pi_0(data_alt, macro_pop)
-P_macro_alt_global = p_matrix(data_alt, macro_pop, macro_son)
-verify_ergodic(P_macro_alt_global, "macro alt global")
-steady_macro_alt   = pi_star(P_macro_alt_global)
-
-## Mobility stats: main vs alt ----
-
-stats_main = compute_mobility_stats(data)
-stats_alt  = compute_mobility_stats(data_alt)
-
-comparison_tbl = bind_rows(
-  stats_main |> mutate(matrix = "main (occ-first)"),
-  stats_alt  |> mutate(matrix = "alt (attachment-first)")
-) |> select(matrix, everything())
-
-cat("\n--- Main vs Alt: global mobility statistics ---\n")
-print(comparison_tbl)
-
-## Regional comparison ----
-
-results_region_alt = data_alt |>
-  group_by(region) |>
-  group_modify(~ compute_mobility_stats(.x)) |>
-  ungroup() |>
-  left_join(count(data_alt, region), by = "region")
-
-comparison_region_tbl = bind_rows(
-  results_region     |> mutate(matrix = "main"),
-  results_region_alt |> mutate(matrix = "alt")
-) |> select(matrix, region, n, sm, em, p_nonemp_fm_farming, p_manual_fm_farming,
-            p_farming_fm_farming)
-
-cat("\n--- Main vs Alt: regional mobility statistics ---\n")
-print(comparison_region_tbl)
-
-## Alt regional maps ----
-
-states_sf_alt = st_as_sf(map("state", plot = FALSE, fill = TRUE)) |>
-  rename(state_name = ID) |>
-  left_join(state_regions, by = "state_name") |>
-  st_make_valid() |>
-  st_buffer(dist = 0) |>
-  left_join(results_region_alt, by = "region")
-
-regions_sf_alt = states_sf_alt |>
-  filter(!is.na(region)) |>
-  group_by(region) |>
-  summarize(geom = st_union(geom), .groups = "drop")
-
-centroids_alt = st_centroid(regions_sf_alt) |>
-  left_join(results_region_alt, by = "region")
-
-sm_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
-                              sm, sm,
-                              "Structural Mobility by Region (Alt)")
-
-em_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
-                              em, em,
-                              "Exchange Mobility by Region (Alt)")
-
-p_manual_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
-                                    p_manual_fm_farming, p_manual_fm_farming,
-                                    "P(Manual | Father Farming) by Region (Alt)")
-
-p_farming_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
-                                     p_farming_fm_farming, p_farming_fm_farming,
-                                     "P(Farming | Father Farming) by Region (Alt)")
-
-p_nonemp_plot_alt = plot_region_map(states_sf_alt, regions_sf_alt, centroids_alt,
-                                    p_nonemp_fm_nonemp, p_nonemp_fm_nonemp,
-                                    "P(Nonemp | Father Nonemp) by Region (Alt)")
-
-## Alt heatmap plots ----
-
-g_macro_alt      = plot_pmat_heatmap(p_mat_macro_alt, macro_pop, macro_son,
-                                     title_expr = expression(P^{alt}))
-g0_macro_alt     = plot_pi_column(pi0_vec_macro_alt, expression(pi[0]^{alt}))
-g_star_macro_alt = plot_pi_column(steady_macro_alt, expression(pi^{"*,alt"}))
-combined_plot_macro_alt = g_macro_alt + g0_macro_alt + g_star_macro_alt +
-  plot_layout(widths = c(6, 1, 1))
-
-combined_main_vs_alt = combined_plot_macro / combined_plot_macro_alt
-combined_main_vs_alt
-
-################################################################################
 ####################### 9. REGIONAL SUMMARY TABLE #############################
 ################################################################################
 
@@ -563,6 +452,8 @@ print(em_sm_ratio)
 ################################################################################
 ####################### 10. ROBUSTNESS: AGE 25-44 #############################
 ################################################################################
+
+stats_main = compute_mobility_stats(data)
 
 data_2544 = data |>
   filter((1940 - birthyr_son) >= 25, (1940 - birthyr_son) <= 44) |>
@@ -659,8 +550,6 @@ dir.create("output/figures", recursive = TRUE, showWarnings = FALSE)
 # Transition matrix heatmaps (wide: P matrix + pi_0 + pi*)
 ggsave("output/figures/pmat_macro.png",        combined_plot_macro,      width = 14, height = 6,  dpi = 200)
 ggsave("output/figures/pmat_meso.png",         combined_plot_meso,       width = 14, height = 6,  dpi = 200)
-ggsave("output/figures/pmat_alt_macro.png",    combined_plot_macro_alt,  width = 14, height = 6,  dpi = 200)
-ggsave("output/figures/pmat_main_vs_alt.png",  combined_main_vs_alt,     width = 14, height = 12, dpi = 200)
 
 # EM/SM mobility curves
 ggsave("output/figures/om_plot.png",           om_plot,         width = 8,  height = 6,  dpi = 200)
@@ -671,10 +560,3 @@ ggsave("output/figures/map_em.png",            em_plot,         width = 10, heig
 ggsave("output/figures/map_p_manual.png",      p_manual_plot,   width = 10, height = 6,  dpi = 200)
 ggsave("output/figures/map_p_farming.png",     p_farming_plot,  width = 10, height = 6,  dpi = 200)
 ggsave("output/figures/map_p_nonemp.png",      p_nonemp_plot,   width = 10, height = 6,  dpi = 200)
-
-# Alt regional maps
-ggsave("output/figures/map_sm_alt.png",        sm_plot_alt,        width = 10, height = 6, dpi = 200)
-ggsave("output/figures/map_em_alt.png",        em_plot_alt,        width = 10, height = 6, dpi = 200)
-ggsave("output/figures/map_p_manual_alt.png",  p_manual_plot_alt,  width = 10, height = 6, dpi = 200)
-ggsave("output/figures/map_p_farming_alt.png", p_farming_plot_alt, width = 10, height = 6, dpi = 200)
-ggsave("output/figures/map_p_nonemp_alt.png",  p_nonemp_plot_alt,  width = 10, height = 6, dpi = 200)

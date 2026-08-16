@@ -33,7 +33,7 @@ meso_order = c("farmer", "farmworker", "crafts", "unskilled", "nonmanual", "none
 
 # --- Modal occupation picker ---
 
-pick_modal_occ = function(df, aian_age, prefer_employed = TRUE, empstatd_tiebreak = FALSE) {
+pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebreak = FALSE) {
   out = df |>
     mutate(birthyr_son = 1940 - age_1940) |>
     left_join(select(aian_age, pid, birth_median), by = "pid") |>
@@ -48,26 +48,30 @@ pick_modal_occ = function(df, aian_age, prefer_employed = TRUE, empstatd_tiebrea
       names_transform = list(year = as.integer),
       values_to = "occ",
       values_drop_na = TRUE) |>
+    mutate(meso = classify_meso(occ)) |>
     group_by(pid, year) |>
     summarise(
       # Constant within (pid, year) — carried through, not aggregated
       birthyr_pop = first(birthyr_pop),
       birthyr_son = first(birthyr_son),
-      occ = {
-        pool <- if (prefer_employed && any(occ <= 970)) occ[occ <= 970] else occ
-        as.integer(names(which.max(table(pool))))
+      meso = {
+        pool <- if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
+          meso[!is.na(meso) & meso != "nonemp"]
+        else
+          meso[!is.na(meso)]
+        if (length(pool) == 0) NA_character_ else names(which.max(table(pool)))
       },
       .groups = "drop") |>
     mutate(implied_age    = ifelse(!is.na(birthyr_pop), year - birthyr_pop, NA_real_),
            son_age_at_obs = year - birthyr_son) |>
     group_by(pid) |>
     mutate(
-      has_pref = prefer_employed & any(occ <= 970, na.rm = TRUE),
-      occ_used = if_else(has_pref & occ <= 970, occ,
-                         if_else(has_pref, NA_integer_, occ))) |>
-    filter(!is.na(occ_used),
+      has_pref  = prefer_employed & any(meso != "nonemp", na.rm = TRUE),
+      meso_used = if_else(has_pref & meso != "nonemp", meso,
+                          if_else(has_pref, NA_character_, meso))) |>
+    filter(!is.na(meso_used),
            is.na(implied_age) | implied_age <= 65) |>
-    add_count(pid, occ_used, name = "freq") |>
+    add_count(pid, meso_used, name = "freq") |>
     filter(freq == max(freq)) |>
     mutate(has_empstatd = year %in% c(1910, 1930, 1940),
            age_dist     = coalesce(abs(son_age_at_obs - 10), Inf))
@@ -80,7 +84,7 @@ pick_modal_occ = function(df, aian_age, prefer_employed = TRUE, empstatd_tiebrea
   out |>
     slice_head(n = 1) |>
     ungroup() |>
-    transmute(pid, occ = occ_used, year, birthyr_pop)
+    transmute(pid, meso = meso_used, year, birthyr_pop)
 }
 
 # --- Region mapping ---
@@ -111,9 +115,11 @@ classify_education = function(educd) {
 
 # --- Propensity score weight estimation ---
 
-compute_weights = function(df_linked, df_full) {
+compute_weights = function(df_linked, df_full,
+                           ps_formula = linked ~ cohort * region + education * region + as.factor(urban_1940)) {
   # df_linked: linked father-son pairs (possibly a bootstrap resample)
   # df_full:   full AIAN comparison sample (held fixed)
+  # ps_formula: model formula passed to speedglm; default uses full-sample spec
   # Returns a list:
   #   $data       — df_linked with p_hat, w_atc, w_atc_norm added
   #   $p_hat_full — PS predictions for df_full from the same model
@@ -130,7 +136,7 @@ compute_weights = function(df_linked, df_full) {
       region    = as.factor(region),
       education = as.factor(education))
 
-  model = speedglm::speedglm(linked ~ cohort * region + education * region + statefip_1940 + urban_1940,
+  model = speedglm::speedglm(ps_formula,
               data = comb, family = binomial())
 
   comb_linked = dplyr::filter(comb, linked == 1)
@@ -353,6 +359,90 @@ pi_star = function(p_mat) {
 
 tv_norm = function(mu, nu) {
   0.5 * sum(abs(mu - nu))
+}
+
+# --- Mobility measures ---
+
+d_t = function(data, level_dad, level_son, t = 1) {
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_s  = pi_star(P_mat)
+  P_t = P_mat %^% t
+  d_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
+  log(max(d_i))
+}
+
+d_prime = function(data, level_dad, level_son, t = 1) {
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  P_t = P_mat %^% t
+  n = nrow(P_t)
+  pairs = combn(n, 2)
+  dvals = apply(pairs, 2, function(idx) {
+    i = idx[1]; j = idx[2]
+    tv_norm(P_t[i, ], P_t[j, ])
+  })
+  log(max(dvals))
+}
+
+am = function(data, level_dad, level_son, t = 1) {
+  pi_init = pi_0(data, {{ level_dad }})
+  P_mat   = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_s    = pi_star(P_mat)
+  P_t  = P_mat %^% t
+  pi_t = as.numeric(pi_init %*% P_t)
+  log(tv_norm(pi_t, pi_s))
+}
+
+im = function(data, level_dad, level_son, t = 1) {
+  P_mat = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_s  = pi_star(P_mat)
+  P_t  = P_mat %^% t
+  im_i = apply(P_t, 1, function(row_i) tv_norm(row_i, pi_s))
+  log(im_i)
+}
+
+mu_t = function(pi0, P, t = 0) {
+  P = as.matrix(P)
+  pi0 = pi0[rownames(P)]
+  stopifnot(!any(is.na(pi0)))
+  if (t == 0) return(as.numeric(pi0))
+  as.numeric(pi0 %*% (P %^% t))
+}
+
+om = function(P, pi0, t) {
+  mu = mu_t(pi0, P, t)
+  1 - sum(mu * diag(P))
+}
+
+sm = function(P, pi0, t) {
+  mu  = mu_t(pi0, P, t)
+  mu1 = as.numeric(mu %*% P)
+  tv_norm(mu, mu1)
+}
+
+# --- Generator identification helpers ---
+
+d_generator = function(P_t, pi_star) {
+  scores = apply(P_t, 1, function(r) tv_norm(r, pi_star))
+  mx = max(scores)
+  i_star = which(abs(scores - mx) < 1e-12)
+  list(classes = rownames(P_t)[i_star], value = mx)
+}
+
+dprime_generator = function(P_t) {
+  n = nrow(P_t)
+  best = -Inf
+  keep = list()
+  for (i in 1:(n-1)) for (j in (i+1):n) {
+    v = tv_norm(P_t[i, ], P_t[j, ])
+    if (v > best + 1e-12) {
+      best = v
+      keep = list(c(i, j))
+    } else if (abs(v - best) <= 1e-12) {
+      keep = append(keep, list(c(i, j)))
+    }
+  }
+  pairs_named = lapply(keep, \(idx) rownames(P_t)[idx])
+  list(pairs = pairs_named, value = best)
 }
 
 # --- Bootstrap SE for transition matrix cells ---

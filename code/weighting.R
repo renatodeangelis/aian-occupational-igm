@@ -36,13 +36,6 @@ aian_comb = bind_rows(
     region    = as.factor(region),
     education = as.factor(education))
 
-p_support = ggplot(aian_comb,
-    aes(x = p_hat, fill = factor(linked, labels = c("Unlinked", "Linked")))) +
-  geom_density(alpha = 0.5) +
-  labs(x = "Propensity score", y = "Density", fill = "Sample") +
-  theme_minimal()
-ggsave("figures/ps_common_support.png", p_support, width = 7, height = 4)
-
 ps_range_linked   = range(aian_comb$p_hat[aian_comb$linked == 1])
 ps_range_unlinked = range(aian_comb$p_hat[aian_comb$linked == 0])
 cat("PS range — linked:", round(ps_range_linked, 4),
@@ -124,3 +117,21 @@ aian_ps = aian_ps |>
 saveRDS(aian_ps, "data/aian_weighted.rds")
 
 saveRDS(aian_full, "data/aian_full.rds")
+
+# --- Regional weights ---
+regional_formula = linked ~ cohort + education + as.factor(urban_1940)
+regions = sort(unique(na.omit(aian_merged$region)))
+regional_weighted = list()
+
+for (reg in regions) {
+  linked_r = filter(aian_merged, region == reg)
+  full_r   = filter(aian_full,   region == reg)
+
+  w_out = compute_weights(linked_r, full_r, ps_formula = regional_formula)
+  regional_weighted[[reg]] = trim_weights_top1(w_out$data)
+
+  ess = with(regional_weighted[[reg]], sum(w_atc_norm)^2 / sum(w_atc_norm^2))
+  cat(reg, "— ESS:", round(ess, 1), "of", nrow(regional_weighted[[reg]]), "\n")
+}
+
+saveRDS(regional_weighted, "data/aian_regional_weighted.rds")
