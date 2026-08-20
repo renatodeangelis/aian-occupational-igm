@@ -77,8 +77,8 @@ plot_pi_column_simple = function(vec, title_expr, levels = NULL) {
 # PER-REGION COMPUTATION AND PLOTTING
 ################################################################################
 
-macro_level_order = c("nonemp", "nonmanual", "manual", "farming")
-meso_level_order  = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+macro_level_order = macro_order
+meso_level_order  = meso_order
 
 regions = names(regional_weighted)
 

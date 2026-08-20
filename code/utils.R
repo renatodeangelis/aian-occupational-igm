@@ -28,8 +28,10 @@ classify_macro = function(meso) {
     meso == "nonemp" ~ "nonemp")
 }
 
-macro_order = c("farming", "manual", "nonmanual", "nonemp")
-meso_order = c("farmer", "farmworker", "crafts", "unskilled", "nonmanual", "nonemp")
+# Canonical display orderings for plots (bottom → top on y-axis).
+# All downstream scripts should reference these rather than hardcoding level vectors.
+macro_order = c("nonemp", "nonmanual", "manual", "farming")
+meso_order  = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
 
 # --- Modal occupation picker ---
 
@@ -485,7 +487,8 @@ dprime_generator = function(P_t) {
 boot_pmatrix_ci = function(
     data, level_dad, level_son,
     df_linked, df_full,
-    R = 500, .seed = NULL) {
+    R = 500, .seed = NULL,
+    mc.cores = 1L) {
 
   if (!is.null(.seed)) set.seed(.seed)
   dad_sym = rlang::ensym(level_dad)
@@ -507,8 +510,13 @@ boot_pmatrix_ci = function(
     p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
   }
 
-  boots = parallel::mclapply(seq_len(R), function(i) boot_once(),            
-                             mc.cores = parallel::detectCores() - 1)
+  # mclapply forks the process and is blocked in IDEs like Positron.
+  # Pass mc.cores > 1 explicitly only when running outside an IDE.
+  boots = if (mc.cores > 1L) {
+    parallel::mclapply(seq_len(R), function(i) boot_once(), mc.cores = mc.cores)
+  } else {
+    lapply(seq_len(R), function(i) boot_once())
+  }
   arr   = simplify2array(boots)    # nR × nC × R array
 
   se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)

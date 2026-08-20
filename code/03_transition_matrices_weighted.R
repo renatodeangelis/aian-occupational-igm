@@ -205,8 +205,7 @@ om_total = bind_rows(macro_om |> mutate(level = 1), meso_om |> mutate(level = 0)
 ############################# 5. PLOTTING ######################################
 ################################################################################
 
-macro_level_order = c("nonemp", "nonmanual", "manual", "farmer")
-meso_level_order = c("nonemp", "nonmanual", "crafts", "unskilled", "farmer", "farmworker")
+meso_level_order = meso_order
 
 ## Transition matrix heatmaps ----
 
