@@ -324,59 +324,49 @@ label_pts_base = regions_sf |>
   bind_cols(st_drop_geometry(regions_sf)) |>
   rename(x = X, y = Y)
 
-# Edit dx/dy in the build_region_map() call at the bottom, then re-run that
-# one call. Order of regions: cali, ok, north, nw, plains, south, sw
-build_region_map = function(
-  dx = c(-5.5,  1.0,  1.0,  0.0,  0.0,  2.5,  0.0),
-  dy = c(-3.0, -2.5, -1.0,  0.0, -2.5,  0.5,  0.0)
-) {
-  nudge = tibble(
-    region = factor(c("cali", "ok", "north", "nw", "plains", "south", "sw"),
-                    levels = region_order),
-    dx = dx,
-    dy = dy
-  )
+# ── LABEL NUDGES ── edit these values, then run this entire block ──────────
+# dx = degrees east (+) or west (-); dy = degrees north (+) or south (-)
+nudge_dx = c(cali = -0.5, ok = 0.0, north =  7.0,
+             nw   =  0.0, plains =  0.0, south =  2.5, sw = 0.0)
+nudge_dy = c(cali = -1.0, ok = 0.0, north = -3.0,
+             nw   =  -2.0, plains = -2.5, south =  0.5, sw = 0.0)
+# ──────────────────────────────────────────────────────────────────────────
 
-  label_pts = label_pts_base |>
-    left_join(nudge, by = "region") |>
-    mutate(xlab = x + dx, ylab = y + dy,
-           leader = (dx != 0 | dy != 0))
-
-  print(label_pts[, c("region", "xlab", "ylab")])
-
-  region_fills = c(
-    sw     = "#EADBC8",
-    south  = "#DCE4D2",
-    cali   = "#D9DEE8",
-    ok     = "#EFE2DA",
-    plains = "#E3E0D5",
-    nw     = "#D6E0DE",
-    north  = "#E6DCE4"
-  )
-
-  region_map = ggplot() +
-    geom_sf(data = regions_sf, aes(fill = region),
-            color = "grey35", linewidth = 0.25) +
-    geom_segment(data = filter(label_pts, leader),
-                 aes(x = x, y = y, xend = xlab, yend = ylab),
-                 color = "grey45", linewidth = 0.2) +
-    geom_text(data = label_pts,
-              aes(x = xlab, y = ylab, label = map_label),
-              size = 3.5, lineheight = 0.95, color = "grey15",
-              fontface = "bold") +
-    scale_fill_manual(values = region_fills, guide = "none") +
-    coord_sf(crs = st_crs(4326), datum = NA, expand = TRUE) +
-    theme_void() +
-    theme(plot.margin = margin(2, 2, 2, 2))
-
-  ggsave("output/presentation/region_map_check.png", region_map,
-         width = 6.8, height = 4.4, units = "in", dpi = 200)
-
-  invisible(region_map)
-}
-
-build_region_map(
-  dx = c(-5.5,  1.0,  1.0,  0.0,  0.0,  2.5,  0.0),
-  dy = c(-3.0, -2.5, -1.0,  0.0, -2.5,  0.5,  0.0)
+nudge = tibble(
+  region = factor(names(nudge_dx), levels = region_order),
+  dx     = nudge_dx,
+  dy     = nudge_dy
 )
+
+label_pts = label_pts_base |>
+  left_join(nudge, by = "region") |>
+  mutate(xlab = x + dx, ylab = y + dy,
+         leader = (dx != 0 | dy != 0))
+
+print(label_pts[, c("region", "xlab", "ylab")])
+
+region_fills = c(
+  sw     = "#EADBC8",
+  south  = "#DCE4D2",
+  cali   = "#D9DEE8",
+  ok     = "#EFE2DA",
+  plains = "#E3E0D5",
+  nw     = "#D6E0DE",
+  north  = "#E6DCE4"
+)
+
+region_map = ggplot() +
+  geom_sf(data = regions_sf, aes(fill = region),
+          color = "grey35", linewidth = 0.25) +
+  geom_text(data = label_pts,
+            aes(x = xlab, y = ylab, label = map_label),
+            size = 3.5, lineheight = 0.95, color = "grey15",
+            fontface = "bold") +
+  scale_fill_manual(values = region_fills, guide = "none") +
+  coord_sf(crs = st_crs(4326), datum = NA, expand = TRUE) +
+  theme_void() +
+  theme(plot.margin = margin(2, 2, 2, 2))
+
+ggsave("output/presentation/region_map_check.png", region_map,
+       width = 6.8, height = 4.4, units = "in", dpi = 200)
 
