@@ -10,6 +10,8 @@ library(tidyr)
 library(ggplot2)
 library(patchwork)
 library(expm)
+library(sf)
+library(maps)
 
 source("code/utils.R")
 
@@ -237,3 +239,144 @@ for (r in names(regional_data)) {
   pis_r = pi_star(P_r)
   print_matrix_block(paste("REGION:", toupper(r)), P_r, pi0_r, pis_r)
 }
+
+################################################################################
+# FIGURE: SEVEN-REGION REFERENCE MAP (slide 4 inset)
+# Categorical fills (identity map); n per region as two-line label.
+################################################################################
+
+# Ordered by pi*_farming descending, matching the slide 8 table.
+region_order = c("sw", "south", "cali", "ok", "plains", "nw", "north")
+
+region_labels = c(
+  sw     = "Southwest",
+  south  = "South",
+  cali   = "California",
+  ok     = "Oklahoma",
+  plains = "Plains",
+  nw     = "Northwest",
+  north  = "North"
+)
+
+region_n = data |>
+  count(region, name = "n") |>
+  filter(!is.na(region)) |>
+  mutate(
+    region      = factor(region, levels = region_order),
+    region_name = region_labels[as.character(region)],
+    map_label   = sprintf("%s\nn = %s", region_name, format(n, big.mark = ","))
+  ) |>
+  arrange(region)
+
+sf::sf_use_s2(FALSE)
+
+state_fips = tibble(
+  state_name = tolower(c(
+    "alabama","arizona","arkansas","california","colorado","connecticut","delaware",
+    "florida","georgia","idaho","illinois","indiana","iowa","kansas","kentucky",
+    "louisiana","maine","maryland","massachusetts","michigan","minnesota",
+    "mississippi","missouri","montana","nebraska","nevada","new hampshire",
+    "new jersey","new mexico","new york","north carolina","north dakota","ohio",
+    "oklahoma","oregon","pennsylvania","rhode island","south carolina","south dakota",
+    "tennessee","texas","utah","vermont","virginia","washington","west virginia",
+    "wisconsin","wyoming")),
+  statefip = c(
+     1, 4, 5, 6, 8, 9,10,
+    12,13,16,17,18,19,20,21,
+    22,23,24,25,26,27,28,29,
+    30,31,32,33,34,35,36,37,
+    38,39,40,41,42,44,45,46,
+    47,48,49,50,51,53,54,55,56)
+) |>
+  mutate(region = assign_region(statefip))
+
+states_sf = st_as_sf(maps::map("state", plot = FALSE, fill = TRUE)) |>
+  # maps::map() IDs include suffixes like "michigan:north"; strip before joining
+  mutate(state_name = sub(":.*$", "", ID)) |>
+  left_join(state_fips, by = "state_name") |>
+  # DC and any other non-state polygons returned by maps::map() have no statefip
+  # match and must be dropped before region assignment
+  filter(!is.na(statefip)) |>
+  st_make_valid()
+
+stopifnot(!any(is.na(states_sf$region)))
+
+# Project to Albers Equal Area for accurate polygon union and surface-point
+# placement, then reproject to WGS84 for degree-based label coordinates
+regions_sf = states_sf |>
+  st_transform(5070) |>
+  group_by(region) |>
+  summarize(geometry = st_union(geom), .groups = "drop") |>
+  st_transform(4326) |>
+  mutate(region = factor(region, levels = region_order)) |>
+  left_join(region_n, by = "region")
+
+# Surface points computed in Albers (accurate), coordinates extracted in WGS84.
+# Kept as label_pts_base so re-running only the nudge block below never causes
+# a column collision (dx/dy already in label_pts would become dx.x/dx.y on the
+# second left_join, silently breaking the mutate).
+label_pts_base = regions_sf |>
+  st_transform(5070) |>
+  st_point_on_surface() |>
+  st_transform(4326) |>
+  st_coordinates() |>
+  as_tibble() |>
+  bind_cols(st_drop_geometry(regions_sf)) |>
+  rename(x = X, y = Y)
+
+# Edit dx/dy in the build_region_map() call at the bottom, then re-run that
+# one call. Order of regions: cali, ok, north, nw, plains, south, sw
+build_region_map = function(
+  dx = c(-5.5,  1.0,  1.0,  0.0,  0.0,  2.5,  0.0),
+  dy = c(-3.0, -2.5, -1.0,  0.0, -2.5,  0.5,  0.0)
+) {
+  nudge = tibble(
+    region = factor(c("cali", "ok", "north", "nw", "plains", "south", "sw"),
+                    levels = region_order),
+    dx = dx,
+    dy = dy
+  )
+
+  label_pts = label_pts_base |>
+    left_join(nudge, by = "region") |>
+    mutate(xlab = x + dx, ylab = y + dy,
+           leader = (dx != 0 | dy != 0))
+
+  print(label_pts[, c("region", "xlab", "ylab")])
+
+  region_fills = c(
+    sw     = "#EADBC8",
+    south  = "#DCE4D2",
+    cali   = "#D9DEE8",
+    ok     = "#EFE2DA",
+    plains = "#E3E0D5",
+    nw     = "#D6E0DE",
+    north  = "#E6DCE4"
+  )
+
+  region_map = ggplot() +
+    geom_sf(data = regions_sf, aes(fill = region),
+            color = "grey35", linewidth = 0.25) +
+    geom_segment(data = filter(label_pts, leader),
+                 aes(x = x, y = y, xend = xlab, yend = ylab),
+                 color = "grey45", linewidth = 0.2) +
+    geom_text(data = label_pts,
+              aes(x = xlab, y = ylab, label = map_label),
+              size = 3.5, lineheight = 0.95, color = "grey15",
+              fontface = "bold") +
+    scale_fill_manual(values = region_fills, guide = "none") +
+    coord_sf(crs = st_crs(4326), datum = NA, expand = TRUE) +
+    theme_void() +
+    theme(plot.margin = margin(2, 2, 2, 2))
+
+  ggsave("output/presentation/region_map_check.png", region_map,
+         width = 6.8, height = 4.4, units = "in", dpi = 200)
+
+  invisible(region_map)
+}
+
+build_region_map(
+  dx = c(-5.5,  1.0,  1.0,  0.0,  0.0,  2.5,  0.0),
+  dy = c(-3.0, -2.5, -1.0,  0.0, -2.5,  0.5,  0.0)
+)
+
