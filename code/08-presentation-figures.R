@@ -122,13 +122,49 @@ P_meso       = p_matrix(data, meso_pop,  meso_son,  matrix = TRUE)
 steady_macro = pi_star(P_macro)
 steady_meso  = pi_star(P_meso)
 
+# Dobrushin's coefficient: d'(1) = 1 - min_{i,j} sum_k min(P[i,k], P[j,k])
+# Equivalently: (1/2) * max_{i,j} sum_k |P[i,k] - P[j,k]|
+# Ranges in [0,1]; lower = faster mixing / more homogeneous rows.
+# Returns a list: coefficient, the generating row pair, and their overlap vector.
+dobrushin = function(P) {
+  idx      = combn(nrow(P), 2)
+  overlaps = apply(idx, 2, function(ij) sum(pmin(P[ij[1], ], P[ij[2], ])))
+  worst    = which.min(overlaps)
+  ij       = idx[, worst]
+  rn       = rownames(P)
+  list(
+    d1      = 1 - overlaps[worst],
+    row1    = if (!is.null(rn)) rn[ij[1]] else ij[1],
+    row2    = if (!is.null(rn)) rn[ij[2]] else ij[2],
+    overlap = pmin(P[ij[1], ], P[ij[2], ])
+  )
+}
+
+res_macro = dobrushin(P_macro)
+res_meso  = dobrushin(P_meso)
+
+cat(sprintf(
+  "\nDobrushin's coefficient d'(1):\n  Macro: %.4f  [rows: %s vs %s]\n  Meso:  %.4f  [rows: %s vs %s]\n",
+  res_macro$d1, res_macro$row1, res_macro$row2,
+  res_meso$d1,  res_meso$row1,  res_meso$row2
+))
+
+d1_macro = res_macro$d1
+d1_meso  = res_meso$d1
+
 ################################################################################
 # FIGURE 1: MACRO TRANSITION MATRIX
 ################################################################################
 
 g_pmac   = plot_pmat_pres(p_mat_macro, macro_pop, macro_son,
                           levels = macro_order,
-                          title_expr = expression(italic(P)))
+                          title_expr = expression(italic(P))) +
+  geom_tile(
+    data = filter(p_mat_macro, macro_pop %in% c(res_macro$row1, res_macro$row2)),
+    aes(x = macro_son, y = macro_pop),
+    fill = NA, color = "black", linewidth = 0.4,
+    inherit.aes = FALSE
+  )
 g0_mac   = plot_pi_pres(pi0_macro, title_expr = expression(pi[0]),
                         levels = macro_order)
 gst_mac  = plot_pi_pres(steady_macro, title_expr = expression(pi^"*"),
@@ -144,7 +180,13 @@ fig_macro = g0_mac + g_pmac + gst_mac +
 g_pmes   = plot_pmat_pres(p_mat_meso, meso_pop, meso_son,
                           levels = meso_order,
                           text_size = 4.5,
-                          title_expr = expression(italic(P)))
+                          title_expr = expression(italic(P))) +
+  geom_tile(
+    data = filter(p_mat_meso, meso_pop %in% c(res_meso$row1, res_meso$row2)),
+    aes(x = meso_son, y = meso_pop),
+    fill = NA, color = "black", linewidth = 0.4,
+    inherit.aes = FALSE
+  )
 g0_mes   = plot_pi_pres(pi0_meso, title_expr = expression(pi[0]),
                         levels = meso_order)
 gst_mes  = plot_pi_pres(steady_meso, title_expr = expression(pi^"*"),
@@ -369,4 +411,22 @@ region_map = ggplot() +
 
 ggsave("output/presentation/region_map_check.png", region_map,
        width = 6.8, height = 4.4, units = "in", dpi = 200)
+
+################################################################################
+# LATEX TABLE: MESO TRANSITION MATRIX SUMMARY
+# Columns: category | inflow to unskilled | retention rate | pi_0 | pi*
+################################################################################
+
+meso_tbl = tibble(
+  Category              = meso_order,
+  `Retention rate`      = diag(P_meso[meso_order, meso_order]),
+  `Inflow to unskilled` = P_meso[meso_order, "unskilled"],
+  `$\\pi_0$`            = pi0_meso[meso_order],
+  `$\\pi^*$`            = steady_meso[meso_order]
+) |>
+  mutate(across(where(is.numeric), ~ round(.x, 2))) |>
+  arrange(desc(`Retention rate`))
+
+cat(knitr::kable(meso_tbl, format = "latex", booktabs = TRUE,
+                 escape = FALSE, linesep = ""))
 
