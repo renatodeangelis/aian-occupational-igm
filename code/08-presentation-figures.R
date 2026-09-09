@@ -95,20 +95,23 @@ plot_pi_pres = function(vec, title_expr, levels = NULL) {
 }
 
 ################################################################################
-# BOOTSTRAP (R = 50)
+# BOOTSTRAP (R = 500)
 ################################################################################
 
 p_mat_macro = boot_pmatrix_ci(
   data, macro_pop, macro_son,
   df_linked = data, df_full = aian_full,
-  R = 50, .seed = 42
+  R = 500, .seed = 42
 )
 
 p_mat_meso = boot_pmatrix_ci(
   data, meso_pop, meso_son,
   df_linked = data, df_full = aian_full,
-  R = 50, .seed = 42
+  R = 500, .seed = 42
 )
+
+saveRDS(p_mat_macro, "cache/p_mat_macro_pres.rds")
+saveRDS(p_mat_meso, "cache/p_mat_meso_pres.rds")
 
 ################################################################################
 # INITIAL AND STATIONARY DISTRIBUTIONS

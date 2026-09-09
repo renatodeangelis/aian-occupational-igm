@@ -7,7 +7,7 @@
 classify_meso = function(occ) {
   farmer_codes   = c(100, 123, 830)
   farmwork_codes = c(810, 820, 840)
-  nonman_codes   = c(1:99, 200:290, 300:490)
+  nonman_codes   = c(0:99, 200:290, 300:490)
   crafts_codes   = c(762, 773, 781, 782)
 
   case_when(

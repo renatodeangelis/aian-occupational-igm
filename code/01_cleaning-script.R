@@ -34,7 +34,7 @@ aian_clean = aian_raw |>
   select(where(~ !all(is.na(.))),
          -starts_with(c("bpld", "birthyr", "gqtyped", "raced", "school_pop",
                         "sex_pop", "sizepl")),
-         -ends_with(c("1850", "1860", "1870", "1880")),
+         -ends_with(c("1850", "1860", "1870", "1880", "1900")),
          -age_1900, -age_1910, -age_1920, -age_1930, -countyicp_1900,
          -countyicp_1910, -countyicp_1920, -countyicp_1930, -empstatd_1910,
          -empstatd_1930, -histid_1900, -histid_1910, -histid_1920, -histid_1930,
@@ -68,14 +68,13 @@ aian_clean = aian_raw |>
                   ~ grepl(";", .x, fixed = TRUE))) |>
   (\(x) { cat("After multiple-father drop:", nrow(x), "unique sons\n"); x })() |>
   mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
-                        histid_pop_1910, histid_pop_1900))
+                        histid_pop_1910))
 
 cat("Unique fathers:", n_distinct(aian_clean$pid), "\n")
 
 aian_age = aian_clean |>
   select(pid, starts_with("age_pop")) |>
-  mutate(birthyr_1900 = 1900 - age_pop_1900,
-         birthyr_1910 = 1910 - age_pop_1910,
+  mutate(birthyr_1910 = 1910 - age_pop_1910,
          birthyr_1920 = 1920 - age_pop_1920,
          birthyr_1930 = 1930 - age_pop_1930,
          birthyr_1940 = 1940 - age_pop_1940) |>
@@ -88,7 +87,7 @@ aian_age = aian_clean |>
     spread_mad = median(abs(c_across(starts_with("birthyr")) - birth_median), na.rm = TRUE)) |>
   ungroup()
 
-modal_meso_pop = pick_modal_meso(aian_clean, aian_age, prefer_employed = TRUE, empstatd_tiebreak = FALSE) |>
+modal_meso_pop = pick_modal_meso(aian_clean, aian_age, prefer_employed = FALSE, empstatd_tiebreak = FALSE) |>
   rename(meso_pop = meso, picked_year = year)
 
 aian_merged = aian_clean |>
