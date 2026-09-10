@@ -23,7 +23,7 @@ library(janitor)
 # WIDE (_1910, _1920 suffixes). Nothing in 01_cleaning-script.R transfers
 # directly; the reshape IS the reconstitution.
 
-EXTRACT_PATH = "https://www.dropbox.com/scl/fi/ffet091zxacvr2iu35f59/usa_00024.csv?rlkey=iuak57l1jhz5ogp12d0rihb13&st=qwff8op0&dl=1"   # <- set this
+EXTRACT_PATH = "https://www.dropbox.com/scl/fi/q4725zk5qw3ltruiucwgc/usa_00026.csv?rlkey=vzauffbwyj61upzhb4fezbq5c&st=y9467v1h&dl=1"
 AIAN         = 3                              # IPUMS RACE code
 OLD_N        = 12246                          # current sample, CLP u MLP v1.0
 
@@ -191,6 +191,7 @@ implausible = father_records |>
 print(implausible)
 
 cat("\nIf gap_lt_15 + gap_gt_60 is under ~1%, POPLOC is trustworthy and the\n")
+
 cat("multiple-father paste-and-drop logic in 01_cleaning-script.R can go.\n")
 cat("Add a SEX check on the father record if SEX was included in the extract.\n")
 
