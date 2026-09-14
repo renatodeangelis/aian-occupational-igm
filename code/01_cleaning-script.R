@@ -5,70 +5,119 @@ library(janitor)
 
 source("code/utils.R")
 
-aian_raw = read_csv(
-  file = "https://www.dropbox.com/scl/fi/3gwg0wvb0sj0njjdjxg1p/clp_mlp1850_1940_linked_subsample_300raced_2022-11-5.csv?rlkey=qvub7x5cy6zsbgp74a90l381q&st=kdbmvn65&dl=1",
-  col_types = cols(.default = col_integer(),
-                   histid_1850 = col_character(),
-                   histid_1860 = col_character(),
-                   histid_1870 = col_character(),
-                   histid_1880 = col_character(),
-                   histid_1900 = col_character(),
-                   histid_1910 = col_character(),
-                   histid_1920 = col_character(),
-                   histid_1930 = col_character(),
-                   histid_1940 = col_character(),
-                   histid_pop_1850 = col_character(),
-                   histid_pop_1860 = col_character(),
-                   histid_pop_1870 = col_character(),
-                   histid_pop_1880 = col_character(),
-                   histid_pop_1900 = col_character(),
-                   histid_pop_1910 = col_character(),
-                   histid_pop_1920 = col_character(),
-                   histid_pop_1930 = col_character(),
-                   histid_pop_1940 = col_character())) |>
-  clean_names()
+aian = 3
+pop_years = c(1910, 1920, 1930, 1940)
+son_years = c(1910, 1920, 1930, 1940, 1950)
 
-cat("Raw linked records:", nrow(aian_raw), "\n")
+son_multiyear = c("lit", "gq", "gqtype", "school", "relate", "age",
+                  "statefip", "speakeng", "occ1950")
+son_1940only  = c("educ", "educd", "sex", "countyicp", "urban", "metro",
+                  "empstat", "empstatd", "labforce", "classwkr", "ind1950",
+                  "farm", "ownershp", "marst", "bpl", "birthyr",
+                  "wkswork1", "hrswork1", "hrswork2", "durunemp",
+                  "incwage", "incnonwg", "migrate5", "migrate5d", "migplac5")
+pop_multiyear = c("histid", "hik", "age", "birthyr", "occ1950", "ind1950",
+                  "classwkr", "labforce", "empstat", "empstatd", "lit",
+                  "speakeng", "farm", "ownershp", "gq", "gqtype", "relate",
+                  "marst", "bpl", "educd", "statefip", "countyicp", "urban")
 
-aian_clean = aian_raw |>
-  select(where(~ !all(is.na(.))),
-         -starts_with(c("bpld", "birthyr", "gqtyped", "raced", "school_pop",
-                        "sex_pop", "sizepl")),
-         -ends_with(c("1850", "1860", "1870", "1880", "1900")),
-         -age_1900, -age_1910, -age_1920, -age_1930, -countyicp_1900,
-         -countyicp_1910, -countyicp_1920, -countyicp_1930, -empstatd_1910,
-         -empstatd_1930, -histid_1900, -histid_1910, -histid_1920, -histid_1930,
-         -labforce_1910, -labforce_1920, -labforce_1930, -occ1950_1900,
-         -occ1950_1910, -occ1950_1920, -occ1950_1930, -school_1900, -school_1910,
-         -school_1920, -school_1930, -sex_1900, -sex_1910, -sex_1920, -sex_1930,
-         -statefip_1900, -statefip_1910, -statefip_1920, -statefip_1930) |>
+path = "https://www.dropbox.com/scl/fi/q4725zk5qw3ltruiucwgc/usa_00026.csv?rlkey=vzauffbwyj61upzhb4fezbq5c&st=y9467v1h&dl=1"
+
+raw = read_csv(path, col_types = cols(.default = col_character())) |>
+  clean_names() |>
+  type_convert(col_types = cols(histid = col_character(),
+                                hik = col_character(),
+                              .default = col_guess()))
+
+sons = raw |>
+  filter(year == 1940, sex == 1, between(age, 20, 44), race == aian,
+         !is.na(hik), hik != "") |>
+  transmute(son_hik = hik, histid_1940 = histid)
+
+cat("Sons (AIAN m 20-44, 1940, linked):", nrow(sons), "\n")
+
+son_records = raw |> semi_join(sons, by = c("hik" = "son_hik")) |>
+  rename(son_hik = hik)
+
+father_records  = son_records |>
+  filter(poploc > 0, year %in% pop_years) |>
+  select(son_hik, year, serial, son_poploc = poploc, son_age = age) |>
+  left_join(raw |> select(year, serial, pernum, everything()) |>
+              rename_with(~ paste0("dad_", .x),
+                          -c(year, serial, pernum)),
+            by = c("year", "serial", "son_poploc" = "pernum"))
+
+unresolved = sum(is.na(father_records$dad_histid))
+cat("Unresolved POPLOC pointers:", unresolved, " <- must be 0; nonzero means household members are incomplete\n")
+
+father_records = father_records |>
+  filter(!is.na(dad_histid), dad_sex == 1)
+
+multi = father_records |>
+  group_by(son_hik) |>
+  summarise(n_dad = n_distinct(dad_hik[!is.na(dad_hik) & dad_hik != ""]), .groups = "drop")
+
+father_records = father_records |> semi_join(filter(multi, n_dad <= 1), by = "son_hik")
+cat("After multiple-father drop:", n_distinct(father_records$son_hik), "sons\n")
+
+father_records = father_records |>
+  group_by(son_hik) |>
+  mutate(pid = coalesce(first(na_if(dad_hik, "")), paste0("s_", son_hik))) |>
+  ungroup()
+
+widen = function(df, vars, years, suffix, id) {
+  vars = intersect(vars, names(df))
+  df |>
+    filter(year %in% years) |>
+    select(all_of(c(id, "year", vars))) |>
+    group_by(across(all_of(c(id, "year")))) |>
+    slice_head(n = 1) |>
+    ungroup() |>
+    pivot_wider(id_cols = all_of(id), names_from = year, values_from = all_of(vars),
+                names_glue = paste0("{.value}", suffix, "{year}"))
+}
+
+son_wide = son_records |>
+  widen(union(son_multiyear, son_1940only), son_years, "_", "son_hik")
+
+pop_wide = father_records |>
+  rename_with(~ sub("^dad_", "", .x)) |>
+  widen(pop_multiyear, pop_years, "_pop_", "son_hik")
+
+aian_clean = sons |>
+  inner_join(distinct(father_records, son_hik, pid), by = "son_hik") |>
+  left_join(pop_wide, by = "son_hik") |>
+  left_join(son_wide, by = "son_hik") |>
   rename(occ_son = occ1950_1940) |>
-  filter(between(age_1940, 20, 44),
-         sex_1940 == 1) |>
-  (\(x) { cat("After age/sex filter:", nrow(x), "son-records\n"); x })() |>
-  group_by(histid_1940) |>
-  summarise(
-    # Son's variables (age, occ, educ, etc.) and weights: identical across
-    # duplicate linked records, so max is safe
-    across(where(is.integer) & !contains("_pop_"), max),
-    # Father's histid columns: paste to detect multiple fathers per son
-    across(where(is.character),
-           ~ paste(unique(na.omit(.x)), collapse = "; ")),
-    # Father's integer characteristics: paste to detect conflicts, recover below
-    across(where(is.integer) & contains("_pop_"),
-           ~ paste(unique(na.omit(.x)), collapse = "; ")),
-    .groups = "drop") |>
-  mutate(
-    # Empty strings from all-NA groups → NA
-    across(where(is.character), ~ na_if(.x, "")),
-    # Former integer columns were pasted; take first value and restore type
-    across(contains("_pop_") & !starts_with("histid_pop"),
-           ~ as.integer(sub(";.*", "", .x)))) |>
-  filter(! if_any(starts_with("histid_pop_"),
-                  ~ grepl(";", .x, fixed = TRUE))) |>
-  (\(x) { cat("After multiple-father drop:", nrow(x), "unique sons\n"); x })() |>
-  mutate(pid = coalesce(histid_pop_1940, histid_pop_1930, histid_pop_1920,
-                        histid_pop_1910))
+  select(-son_hik) |>
+  select(where(~ !all(is.na(.x))))
+
+cat("\nNon-missing counts for father-side variables by year:\n")
+print(aian_clean |>
+  summarise(across(matches("_pop_\\d{4}$"), ~ sum(!is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "col", values_to = "n") |>
+  separate_wider_regex(col, c(var = ".*", "_pop_", yr = "\\d{4}")) |>
+  pivot_wider(names_from = yr, values_from = n),
+n = 40)
+
+stopifnot(
+  "duplicate sons" = !any(duplicated(aian_clean$histid_1940)),
+  "pid missing" = !any(is.na(aian_clean$pid)),
+  "occ_son missing" = "occ_son" %in% names(aian_clean),
+  "no occ1950_pop cols" = any(grepl("^occ1950_pop_\\d{4}$", names(aian_clean))),
+  "no age_pop cols" = any(grepl("^age_pop_\\d{4}$", names(aian_clean))))
+
+cat("\nFather-year coverage (drives the single-observation problem):\n")
+print(aian_clean |>
+        summarise(across(matches("^occ1950_pop_\\d{4}$"), ~ sum(!is.na(.x)))) |>
+        pivot_longer(everything(), names_to = "col", values_to = "n"))
+ 
+n_obs = aian_clean |>
+  transmute(k = rowSums(!is.na(pick(matches("^occ1950_pop_\\d{4}$")))))
+cat("\nFather observations per son:\n")
+print(count(n_obs, k))
+cat("Single-observation fathers:", sum(n_obs$k == 1),
+    sprintf("(%.1f%%)\n", 100 * mean(n_obs$k == 1)))
 
 cat("Unique fathers:", n_distinct(aian_clean$pid), "\n")
 
