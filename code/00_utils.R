@@ -1,6 +1,6 @@
-# Shared classification functions, region mapping, mobility functions,
-# and weight estimation.
-# Sourced by cleaning-script.R, weighting.R, and transition_matrices_weighted.R
+# Shared utilities: occupation classification, region mapping, weight estimation,
+# transition matrix functions, mobility measures, and plot helpers.
+# Sourced by all analysis scripts; never run directly.
 
 # --- Occupation classification ---
 
@@ -29,9 +29,12 @@ classify_macro = function(meso) {
 }
 
 # Canonical display orderings for plots (bottom → top on y-axis).
-# All downstream scripts should reference these rather than hardcoding level vectors.
-macro_order = c("nonemp", "nonmanual", "manual", "farming")
-meso_order  = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+macro_order         = c("nonemp", "nonmanual", "manual", "farming")
+meso_order          = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+
+# Alphabetical order — matches p_matrix() output (which uses sort(union(...))).
+# Use when indexing P by name to avoid positional errors.
+macro_compute_order = c("farming", "manual", "nonmanual", "nonemp")
 
 # --- Modal occupation picker ---
 
@@ -53,9 +56,9 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
     mutate(meso = classify_meso(occ)) |>
     group_by(pid, year) |>
     summarise(
-      # Constant within (pid, year) — carried through, not aggregated
       birthyr_pop = first(birthyr_pop),
       birthyr_son = first(birthyr_son),
+      occ_pop     = first(occ),    # raw occ code for this observation year
       meso = {
         pool = if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
           meso[!is.na(meso) & meso != "nonemp"]
@@ -86,7 +89,7 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
   out |>
     slice_head(n = 1) |>
     ungroup() |>
-    transmute(pid, meso = meso_used, year, birthyr_pop)
+    transmute(pid, meso = meso_used, year, birthyr_pop, occ_pop)
 }
 
 # --- Region mapping ---
@@ -119,13 +122,6 @@ classify_education = function(educd) {
 
 compute_weights = function(df_linked, df_full,
                            ps_formula = linked ~ cohort * region + education * region + as.factor(urban_1940)) {
-  # df_linked: linked father-son pairs (possibly a bootstrap resample)
-  # df_full:   full AIAN comparison sample (held fixed)
-  # ps_formula: model formula passed to speedglm; default uses full-sample spec
-  # Returns a list:
-  #   $data       — df_linked with p_hat, w_atc, w_atc_norm added
-  #   $p_hat_full — PS predictions for df_full from the same model
-
   comb = dplyr::bind_rows(
     df_linked |> dplyr::mutate(linked = 1),
     df_full   |> dplyr::mutate(linked = 0)
@@ -179,14 +175,34 @@ compute_weights = function(df_linked, df_full,
 #
 # ASSUMPTION:
 #   df has columns w_atc and w_atc_norm — i.e., it is compute_weights()$data.
-#   Calling this on any other data frame will silently produce wrong results.
 
 trim_weights_top1 = function(df) {
   thresh = quantile(df$w_atc, 0.99, na.rm = TRUE)
   dplyr::mutate(df,
-    w_atc      = pmin(w_atc, thresh),    # cap extremes; do not remove rows
-    w_atc_norm = w_atc * dplyr::n() / sum(w_atc)   # renormalise after cap
+    w_atc      = pmin(w_atc, thresh),
+    w_atc_norm = w_atc * dplyr::n() / sum(w_atc)
   )
+}
+
+# --- Data loading helpers ---
+
+# Renormalise w_atc_norm within df so weights average to 1.
+renorm = function(df) {
+  dplyr::mutate(df, w_atc_norm = w_atc_norm / sum(w_atc_norm) * dplyr::n())
+}
+
+# Load the global weighted dataset and set macro_levels / meso_levels in the
+# calling frame so pi_0() can find them without a warning.
+load_global = function(path = "data/aian_weighted.rds") {
+  assign("macro_levels", macro_compute_order, envir = parent.frame())
+  assign("meso_levels",  meso_order,          envir = parent.frame())
+  readRDS(path) |> dplyr::mutate(w_atc_norm = w_trim_norm)
+}
+
+# Load per-region weighted datasets. Regional data already has w_atc_norm set
+# to trimmed weights by 02_weighting.R — do NOT apply mutate(w_atc_norm = w_trim_norm).
+load_regional = function(path = "data/aian_regional_weighted.rds") {
+  readRDS(path)
 }
 
 # --- Transition matrix and distribution functions ---
@@ -460,29 +476,6 @@ dprime_generator = function(P_t) {
 #   Returns standard errors only — not confidence intervals. SEs are the only
 #   bootstrap output used for the transition matrix tables. Percentile CIs would
 #   require R ≥ 1000 and are not needed here; sd() across draws converges faster.
-#
-# INPUTS:
-#   data      — the loaded analysis dataset (aian_weighted.csv). Used only for
-#               the occupational classification columns (macro_pop, macro_son,
-#               etc.); existing weight columns are overwritten by each call to
-#               compute_weights().
-#   df_linked — same object as data is fine. compute_weights() only reads
-#               birthyr_son, region, education, statefip_1940, urban_1940 for
-#               the PS model; all other columns pass through unchanged.
-#   df_full   — the full AIAN extract (aian_full.rds). Held fixed across all
-#               draws. Resampling df_full as well would be defensible but is
-#               not standard practice for ATC weighting where df_full represents
-#               a (near-)population target.
-#
-# ASSUMPTIONS:
-#   1. df_linked has region and education columns (added by weighting.R before
-#      compute_weights() was called). Passing aian_weighted.csv satisfies this.
-#   2. Occasional bootstrap resamples may produce sparse cohort×region cells,
-#      causing the GLM to fail or return extreme predictions. These draws are
-#      not guarded against here; consider wrapping boot_once() in tryCatch()
-#      if convergence warnings appear in practice.
-#   3. R = 500 is sufficient for stable SE estimation. For the final paper,
-#      bump to 1000 and verify SEs change by < 5%.
 
 boot_pmatrix_ci = function(
     data, level_dad, level_son,
@@ -495,8 +488,6 @@ boot_pmatrix_ci = function(
   son_sym = rlang::ensym(level_son)
   N = nrow(df_linked)
 
-  # Point estimate: run the full pipeline (weight → trim → P) on the complete
-  # linked sample, so the point estimate is on the same pipeline as each draw.
   w_full = compute_weights(df_linked, df_full)
   d_full = trim_weights_top1(w_full$data)
   P_hat  = p_matrix(d_full, !!dad_sym, !!son_sym, matrix = TRUE)
@@ -505,19 +496,17 @@ boot_pmatrix_ci = function(
 
   boot_once = function() {
     idx = sample.int(N, N, replace = TRUE)
-    w_b = compute_weights(df_linked[idx, ], df_full)   # re-estimate PS on draw
-    d_b = trim_weights_top1(w_b$data)                  # trim this draw's weights
+    w_b = compute_weights(df_linked[idx, ], df_full)
+    d_b = trim_weights_top1(w_b$data)
     p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
   }
 
-  # mclapply forks the process and is blocked in IDEs like Positron.
-  # Pass mc.cores > 1 explicitly only when running outside an IDE.
   boots = if (mc.cores > 1L) {
     parallel::mclapply(seq_len(R), function(i) boot_once(), mc.cores = mc.cores)
   } else {
     lapply(seq_len(R), function(i) boot_once())
   }
-  arr   = simplify2array(boots)    # nR × nC × R array
+  arr   = simplify2array(boots)
 
   se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
 
@@ -527,4 +516,165 @@ boot_pmatrix_ci = function(
     est = as.vector(P_hat),
     se  = as.vector(se_mat)
   )
+}
+
+# --- Occupation labels and recoding ---
+
+occ_labels = c(
+  farming    = "Farming",
+  farmer     = "Farming",
+  farmworker = "Farmworker",
+  nonemp     = "Non-employed",
+  nonmanual  = "Non-manual",
+  manual     = "Manual",
+  crafts     = "Crafts",
+  unskilled  = "Unskilled"
+)
+
+recode_occ_df = function(df, ...) {
+  vars = rlang::ensyms(...)
+  for (v in vars) {
+    df = df |> mutate(!!v := dplyr::recode(as.character(!!v), !!!occ_labels))
+  }
+  df
+}
+
+recode_occ_vec = function(vec) {
+  setNames(as.numeric(vec), dplyr::recode(names(vec), !!!occ_labels))
+}
+
+# Display-name level vectors (for axis labels in plots).
+# Use these for factor levels on plot axes; use macro_order / meso_order for
+# ordering computations and factor() calls on data columns.
+macro_display_order = occ_labels[c("nonemp", "nonmanual", "manual", "farming")]
+canonical_meso      = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+meso_display_order  = occ_labels[canonical_meso]
+
+# --- Dobrushin's contraction coefficient ---
+#
+# d1 = 1 - min_{i,j} sum_k min(P[i,k], P[j,k])
+#    = max TV distance between any two rows of P.
+# Equivalent to (1/2) * max_{i,j} sum_k |P[i,k] - P[j,k]|.
+# Ranges in [0,1]; lower = faster mixing.
+
+dobrushin = function(P) {
+  idx      = combn(nrow(P), 2)
+  overlaps = apply(idx, 2, function(ij) sum(pmin(P[ij[1], ], P[ij[2], ])))
+  worst    = which.min(overlaps)
+  ij       = idx[, worst]
+  rn       = rownames(P)
+  list(
+    d1      = 1 - overlaps[worst],
+    row1    = if (!is.null(rn)) rn[ij[1]] else ij[1],
+    row2    = if (!is.null(rn)) rn[ij[2]] else ij[2],
+    overlap = pmin(P[ij[1], ], P[ij[2], ])
+  )
+}
+
+# --- Long-format matrix helper ---
+# Converts a point-estimate matrix to the same tibble format as boot_pmatrix_ci()
+# output (se = NA), so it can be passed directly to plot_pmat().
+
+pmat_long = function(P, dad_nm = "dad", son_nm = "son") {
+  rn = rownames(P); cn = colnames(P)
+  expand.grid(setNames(list(rn, cn), c(dad_nm, son_nm)),
+              stringsAsFactors = FALSE) |>
+    dplyr::mutate(est = as.vector(t(P)), se = NA_real_)
+}
+
+# --- State FIPS to region lookup (1940 boundaries) ---
+
+state_fips_1940 = tibble::tibble(
+  state_name = tolower(c(
+    "alabama","arizona","arkansas","california","colorado","connecticut","delaware",
+    "florida","georgia","idaho","illinois","indiana","iowa","kansas","kentucky",
+    "louisiana","maine","maryland","massachusetts","michigan","minnesota",
+    "mississippi","missouri","montana","nebraska","nevada","new hampshire",
+    "new jersey","new mexico","new york","north carolina","north dakota","ohio",
+    "oklahoma","oregon","pennsylvania","rhode island","south carolina","south dakota",
+    "tennessee","texas","utah","vermont","virginia","washington","west virginia",
+    "wisconsin","wyoming")),
+  statefip = c(
+     1, 4, 5, 6, 8, 9,10,
+    12,13,16,17,18,19,20,21,
+    22,23,24,25,26,27,28,29,
+    30,31,32,33,34,35,36,37,
+    38,39,40,41,42,44,45,46,
+    47,48,49,50,51,53,54,55,56)
+) |>
+  dplyr::mutate(region = assign_region(statefip))
+
+# --- Plot helpers ---
+
+# Heatmap for a transition matrix. boot_df is the tibble from boot_pmatrix_ci()
+# or pmat_long(). If se is non-NA, labels show "est\n(se)"; otherwise just "est".
+plot_pmat = function(boot_df, dad_var, son_var,
+                     levels = NULL, text_size = 5.5, title_expr = "P") {
+  dad_sym = rlang::ensym(dad_var)
+  son_sym = rlang::ensym(son_var)
+
+  plot_df = boot_df
+  if (!is.null(levels)) {
+    plot_df = plot_df |>
+      dplyr::mutate(!!dad_sym := factor(!!dad_sym, levels = levels),
+                    !!son_sym := factor(!!son_sym, levels = rev(levels)))
+  }
+  has_se = !all(is.na(plot_df$se))
+
+  ggplot2::ggplot(plot_df, ggplot2::aes(x = !!son_sym, y = !!dad_sym, fill = est)) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.8) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = if (has_se)
+                     sprintf("%.2f\n(%.3f)", est, se)
+                   else
+                     sprintf("%.2f", est)),
+      vjust = 0.3, size = text_size) +
+    ggplot2::scale_fill_gradient(low = "lightyellow", high = "firebrick",
+                                 limits = c(0, 1)) +
+    ggplot2::guides(fill = ggplot2::guide_colorbar(
+      barwidth  = ggplot2::unit(7, "cm"),
+      barheight = ggplot2::unit(0.5, "cm"))) +
+    ggplot2::labs(x = "Son's occupation", y = NULL, fill = "Prob.",
+                  title = title_expr) +
+    ggplot2::theme_minimal(base_size = 16) +
+    ggplot2::theme(
+      axis.text.x     = ggplot2::element_text(angle = 45, hjust = 1, size = 13),
+      axis.text.y     = ggplot2::element_text(angle = 45, hjust = 1, size = 13),
+      axis.ticks      = ggplot2::element_blank(),
+      axis.title.x    = ggplot2::element_text(size = 14),
+      legend.position = "bottom",
+      legend.text     = ggplot2::element_text(size = 12),
+      legend.title    = ggplot2::element_text(size = 13),
+      plot.title      = ggplot2::element_text(hjust = 0.5, size = 20, face = "bold"),
+      panel.grid      = ggplot2::element_blank()
+    )
+}
+
+# Single-column tile for a named probability vector (pi_0 or pi*).
+plot_pi = function(vec, title_expr, levels = NULL) {
+  df = tibble::tibble(occ = names(vec), value = as.numeric(vec))
+  if (!is.null(levels)) {
+    df = df |> dplyr::mutate(occ = factor(occ, levels = levels))
+  } else {
+    df = df |> dplyr::mutate(occ = factor(occ, levels = rev(unique(occ))))
+  }
+
+  ggplot2::ggplot(df, ggplot2::aes(x = 1, y = occ, fill = value)) +
+    ggplot2::geom_tile(color = "white", linewidth = 0.8) +
+    ggplot2::geom_text(ggplot2::aes(label = sprintf("%.2f", value)), size = 5) +
+    ggplot2::scale_fill_gradient(low = "lightyellow", high = "firebrick",
+                                 limits = c(0, 1)) +
+    ggplot2::labs(y = "Father's occupation", title = title_expr) +
+    ggplot2::theme_minimal(base_size = 16) +
+    ggplot2::theme(
+      axis.title.x    = ggplot2::element_blank(),
+      axis.text.x     = ggplot2::element_blank(),
+      axis.ticks.x    = ggplot2::element_blank(),
+      axis.title.y    = ggplot2::element_text(size = 14),
+      axis.text.y     = ggplot2::element_text(angle = 45, hjust = 1, size = 13),
+      axis.ticks.y    = ggplot2::element_blank(),
+      legend.position = "none",
+      plot.title      = ggplot2::element_text(hjust = 0.5, size = 20, face = "bold"),
+      panel.grid      = ggplot2::element_blank()
+    )
 }
