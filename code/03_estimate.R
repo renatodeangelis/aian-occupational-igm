@@ -3,10 +3,10 @@
 # Estimate transition matrices, distributions, and mobility scalars.
 # ONLY script that calls p_matrix(), pi_0(), pi_star(), boot_pmatrix_ci().
 #
-# Reads:  data/aian_weighted.rds
+# Reads:  data/aian_weighted.rds          (via load_global())
+#         data/aian_regional_weighted.rds  (via load_regional())
 #         data/aian_full.rds
-# Writes: data/estimates.rds
-#         cache/  (bootstrap results)
+# Writes: output/estimates.rds
 ################################################################################
 
 library(dplyr)
@@ -19,43 +19,16 @@ data      = load_global()   # sets macro_levels and meso_levels in this frame
 aian_full = readRDS("data/aian_full.rds")
 
 ################################################################################
-# BOOTSTRAP CACHE
-# Set force_rerun = TRUE to discard cache and re-estimate all bootstrap draws.
-# Delete individual files from cache/ to selectively re-run one object.
-# Cache is NOT auto-invalidated when aian_weighted.rds changes — delete cache/
-# manually after re-running 02_weighting.R.
-################################################################################
-
-force_rerun = FALSE
-cache_dir   = "cache"
-dir.create(cache_dir, showWarnings = FALSE)
-
-cache_load_local = function(name, expr, force = force_rerun) {
-  path = file.path(cache_dir, paste0(name, ".rds"))
-  if (!force && file.exists(path)) {
-    message("Loading cached: ", name)
-    return(readRDS(path))
-  }
-  res = eval(expr, envir = parent.frame())
-  saveRDS(res, path)
-  res
-}
-
-################################################################################
 # GLOBAL BOOTSTRAP TRANSITION MATRICES
 ################################################################################
 
-p_mat_macro = cache_load_local("p_mat_macro", quote(
-  boot_pmatrix_ci(data, macro_pop, macro_son,
-                  df_linked = data, df_full = aian_full,
-                  R = 500, .seed = 123)
-))
+p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
+                               df_linked = data, df_full = aian_full,
+                               R = 500, .seed = 123)
 
-p_mat_meso = cache_load_local("p_mat_meso", quote(
-  boot_pmatrix_ci(data, meso_pop, meso_son,
-                  df_linked = data, df_full = aian_full,
-                  R = 500, .seed = 123)
-))
+p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son,
+                               df_linked = data, df_full = aian_full,
+                               R = 500, .seed = 123)
 
 ################################################################################
 # GLOBAL POINT ESTIMATES
@@ -82,12 +55,12 @@ cat("Global meso pi*:\n");      print(round(steady_meso,  3))
 # GLOBAL MOBILITY SCALARS
 ################################################################################
 
-om_macro = om(P_macro, pi0_macro, t = 1)
-sm_macro = sm(P_macro, pi0_macro, t = 1)
+om_macro = om(P_macro, pi0_macro, t = 0)
+sm_macro = sm(P_macro, pi0_macro, t = 0)
 em_macro = om_macro - sm_macro
 
-om_meso  = om(P_meso, pi0_meso, t = 1)
-sm_meso  = sm(P_meso, pi0_meso, t = 1)
+om_meso  = om(P_meso, pi0_meso, t = 0)
+sm_meso  = sm(P_meso, pi0_meso, t = 0)
 em_meso  = om_meso - sm_meso
 
 cat(sprintf(
@@ -111,8 +84,8 @@ cat(sprintf(
 
 ################################################################################
 # REGIONAL POINT ESTIMATES
-# Uses global-weighted data filtered to each region (matching validated expected
-# values). macro_levels / meso_levels are already set by load_global() above.
+# Uses region-specific PS model data (load_regional()); w_atc_norm already
+# trimmed. macro_levels / meso_levels set by load_global() above satisfy TRAP-1.
 ################################################################################
 
 regions_list = c("sw", "south", "cali", "ok", "plains", "nw", "north")
@@ -148,8 +121,8 @@ compute_regional = function(df_reg) {
     pistar     = pis,
     n          = nrow(df_reg),
     lambda2    = lambda2,
-    om1        = om(P, pi0, t = 1),
-    sm1        = sm(P, pi0, t = 1),
+    om1        = om(P, pi0, t = 0),
+    sm1        = sm(P, pi0, t = 0),
     farm_ret   = cell("farming", "farming"),
     pi_farming = pisel("farming"),
     pi_manual  = pisel("manual"),
@@ -159,8 +132,10 @@ compute_regional = function(df_reg) {
   )
 }
 
+regional_data = load_regional()
+
 regional_results = setNames(
-  lapply(regions_list, function(r) compute_regional(filter(data, region == r))),
+  lapply(regions_list, function(r) compute_regional(regional_data[[r]])),
   regions_list
 )
 
@@ -225,7 +200,7 @@ estimates = list(
   # Dobrushin
   dob_mac       = dob_mac,
   dob_mes       = dob_mes,
-  # Scalar mobility (global, t=1)
+  # Scalar mobility (global, t=0)
   om_macro      = om_macro,
   sm_macro      = sm_macro,
   em_macro      = em_macro,
@@ -238,5 +213,6 @@ estimates = list(
   region_display = region_display
 )
 
-saveRDS(estimates, "data/estimates.rds")
-cat("\nWrote data/estimates.rds\n")
+dir.create("output", showWarnings = FALSE, recursive = TRUE)
+saveRDS(estimates, "output/estimates.rds")
+cat("\nWrote output/estimates.rds\n")

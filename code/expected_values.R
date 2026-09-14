@@ -17,23 +17,24 @@ EXPECTED = list(
   ),
 
   # --- Regional macro statistics ---
-  # Source: 08_regional_table.R assertions (global data filtered by region)
+  # Source: 03_estimate.R (region-specific PS model via load_regional())
   # Fields: farm_ret, pi_farming, pi_manual, pi_nonman, lambda2, relief, n
+  # Fill NA entries after first clean run of 03_estimate.R.
   regional = list(
-    sw     = list(farm_ret=.623, pi_farming=.469, pi_manual=.386, pi_nonman=.032,
-                  lambda2=.313, relief=.110, n=2090L),
-    south  = list(farm_ret=.739, pi_farming=.376, pi_manual=.482, pi_nonman=.072,
-                  lambda2=.682, relief=.062, n=1139L),
-    cali   = list(farm_ret=.442, pi_farming=.350, pi_manual=.513, pi_nonman=.016,
-                  lambda2=.186, relief=.165, n= 645L),
-    ok     = list(farm_ret=.459, pi_farming=.276, pi_manual=.405, pi_nonman=.113,
-                  lambda2=.377, relief=.136, n=2531L),
-    plains = list(farm_ret=.370, pi_farming=.268, pi_manual=.538, pi_nonman=.067,
-                  lambda2=.170, relief=.255, n=2656L),
-    nw     = list(farm_ret=.436, pi_farming=.243, pi_manual=.595, pi_nonman=.031,
-                  lambda2=.295, relief=.174, n=1155L),
-    north  = list(farm_ret=.234, pi_farming=.106, pi_manual=.698, pi_nonman=.061,
-                  lambda2=.180, relief=.233, n=2030L)
+    sw     = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    south  = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    cali   = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    ok     = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    plains = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    nw     = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_),
+    north  = list(farm_ret=NA_real_, pi_farming=NA_real_, pi_manual=NA_real_, pi_nonman=NA_real_,
+                  lambda2=NA_real_, relief=NA_real_, n=NA_integer_)
   ),
 
   # --- Slide 7 panel 1: farming father → macro_son exit shares ---
@@ -54,20 +55,20 @@ EXPECTED = list(
     other   = 0.053
   ),
 
-  # --- Global macro mobility scalars at t=1 (fill after re-run) ---
+  # --- Global macro mobility scalars at t=0 (fill after re-run) ---
   macro_global = list(
-    om_1  = NA_real_,
-    sm_1  = NA_real_,
-    em_1  = NA_real_,
+    om_0  = NA_real_,
+    sm_0  = NA_real_,
+    em_0  = NA_real_,
     d1    = NA_real_,
     n     = NA_integer_
   ),
 
-  # --- Global meso mobility scalars at t=1 (fill after re-run) ---
+  # --- Global meso mobility scalars at t=0 (fill after re-run) ---
   meso_global = list(
-    om_1  = NA_real_,
-    sm_1  = NA_real_,
-    em_1  = NA_real_,
+    om_0  = NA_real_,
+    sm_0  = NA_real_,
+    em_0  = NA_real_,
     d1    = NA_real_,
     n     = NA_integer_
   )

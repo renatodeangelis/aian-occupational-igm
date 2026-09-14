@@ -54,17 +54,17 @@ cohort_results = map(cohort_labels, function(cg) {
   list(
     cohort = cg,
     P      = P,
-    om1    = round(om(P, pi0, t = 1), 3),
-    sm1    = round(sm(P, pi0, t = 1), 3),
+    om0    = round(om(P, pi0, t = 0), 3),
+    sm0    = round(sm(P, pi0, t = 0), 3),
     d1     = round(dobrushin(P)$d1,   3)
   )
 })
 
 cohort_tbl = map_dfr(cohort_results, function(res) {
-  tibble(cohort = res$cohort, om_1 = res$om1, sm_1 = res$sm1, d1 = res$d1)
+  tibble(cohort = res$cohort, om_0 = res$om0, sm_0 = res$sm0, d1 = res$d1)
 })
 
-cat("\n--- Cohort stationarity: OM(1), SM(1), Dobrushin d1 by birth cohort ---\n")
+cat("\n--- Cohort stationarity: OM(0), SM(0), Dobrushin d1 by birth cohort ---\n")
 print(cohort_tbl)
 
 cat("\n--- Macro transition matrices by cohort ---\n")
@@ -97,8 +97,8 @@ pi0_2544 = pi_0(data_2544, macro_pop)
 robustness_tbl = tibble(
   sample     = c("main (20-44)", "restricted (25-44)"),
   n          = c(nrow(data), nrow(data_2544)),
-  om_1       = round(c(om(P_main, pi0_main, t=1), om(P_2544, pi0_2544, t=1)), 3),
-  sm_1       = round(c(sm(P_main, pi0_main, t=1), sm(P_2544, pi0_2544, t=1)), 3),
+  om_0       = round(c(om(P_main, pi0_main, t=0), om(P_2544, pi0_2544, t=0)), 3),
+  sm_0       = round(c(sm(P_main, pi0_main, t=0), sm(P_2544, pi0_2544, t=0)), 3),
   d1         = round(c(dobrushin(P_main)$d1,       dobrushin(P_2544)$d1),       3),
   farm_farm  = round(c(P_main["farming","farming"], P_2544["farming","farming"]), 3)
 )
@@ -137,8 +137,8 @@ if (!"occ_pop" %in% names(data)) {
   emp_tbl = tibble(
     sample    = c("main (all)", "employed-only"),
     n         = c(nrow(data), nrow(data_emp)),
-    om_1      = round(c(om(P_main, pi0_main, t=1), om(P_emp, pi0_emp, t=1)), 3),
-    sm_1      = round(c(sm(P_main, pi0_main, t=1), sm(P_emp, pi0_emp, t=1)), 3),
+    om_0      = round(c(om(P_main, pi0_main, t=0), om(P_emp, pi0_emp, t=0)), 3),
+    sm_0      = round(c(sm(P_main, pi0_main, t=0), sm(P_emp, pi0_emp, t=0)), 3),
     d1        = round(c(dobrushin(P_main)$d1,       dobrushin(P_emp)$d1),     3),
     farm_farm = round(c(P_main["farming","farming"], P_emp["farming","farming"]), 3)
   )
@@ -167,8 +167,8 @@ cat("\nMax absolute cell difference:", round(max(abs(P_unw - P_main[rownames(P_u
 
 unw_tbl = tibble(
   sample    = c("weighted", "unweighted"),
-  om_1      = round(c(om(P_main, pi0_main, t=1), om(P_unw, pi0_unw, t=1)), 3),
-  sm_1      = round(c(sm(P_main, pi0_main, t=1), sm(P_unw, pi0_unw, t=1)), 3),
+  om_0      = round(c(om(P_main, pi0_main, t=0), om(P_unw, pi0_unw, t=0)), 3),
+  sm_0      = round(c(sm(P_main, pi0_main, t=0), sm(P_unw, pi0_unw, t=0)), 3),
   d1        = round(c(dobrushin(P_main)$d1,       dobrushin(P_unw)$d1),     3),
   farm_farm = round(c(P_main["farming","farming"], P_unw["farming","farming"]), 3)
 )

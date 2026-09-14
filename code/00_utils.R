@@ -194,10 +194,9 @@ renorm = function(df) {
 # Load the global weighted dataset and set macro_levels / meso_levels in the
 # calling frame so pi_0() can find them without a warning.
 load_global = function(path = "data/aian_weighted.rds") {
-  data = readRDS(path) |> dplyr::mutate(w_atc_norm = w_trim_norm)
-  assign("macro_levels", unique(data$macro_pop), envir = parent.frame())
-  assign("meso_levels",  unique(data$meso_pop),  envir = parent.frame())
-  data
+  assign("macro_levels", macro_compute_order, envir = parent.frame())
+  assign("meso_levels",  meso_order,          envir = parent.frame())
+  readRDS(path) |> dplyr::mutate(w_atc_norm = w_trim_norm)
 }
 
 # Load per-region weighted datasets. Regional data already has w_atc_norm set

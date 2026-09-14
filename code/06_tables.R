@@ -7,7 +7,7 @@
 # §3  Meso summary table
 # §4  Zero-cell check and Blume-style ε perturbation
 #
-# Reads:  data/estimates.rds
+# Reads:  output/estimates.rds
 # Writes: output/figures/slide08_regional_table.tex
 #         output/figures/slide08_zero_cell_check.tex
 #         (meso table printed to console for copy-paste into .tex)
@@ -19,7 +19,7 @@ library(knitr)
 source("code/00_utils.R")
 source("code/expected_values.R")
 
-est = readRDS("data/estimates.rds")
+est = readRDS("output/estimates.rds")
 
 regional_results = est$regional
 regions_list     = est$regions_list

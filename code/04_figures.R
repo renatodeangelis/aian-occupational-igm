@@ -4,7 +4,7 @@
 # Layout: pi_0 | P | pi* (widths 1:6:1).
 # Dobrushin worst-row pair highlighted with black border.
 #
-# Reads:  data/estimates.rds
+# Reads:  output/estimates.rds
 # Writes: output/presentation/fig1_macro_matrix.{pdf,png}
 #         output/presentation/fig2_meso_matrix.{pdf,png}
 #         output/presentation/region_map_check.png
@@ -18,7 +18,7 @@ library(maps)
 
 source("code/00_utils.R")
 
-est = readRDS("data/estimates.rds")
+est = readRDS("output/estimates.rds")
 
 # Restore objects from estimates list
 p_mat_macro  = est$p_mat_macro
@@ -33,7 +33,7 @@ dob_mac      = est$dob_mac
 dob_mes      = est$dob_mes
 
 # Rebuild macro_levels / meso_levels for pi_0() if called from this script
-macro_levels = macro_order
+macro_levels = macro_compute_order
 meso_levels  = meso_order
 
 dir.create("output/presentation", recursive = TRUE, showWarnings = FALSE)
