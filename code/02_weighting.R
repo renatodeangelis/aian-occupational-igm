@@ -10,7 +10,7 @@ aian_merged = readRDS("data/aian_merged.rds") |>
          education = classify_education(educd_1940))
 
 aian_full = read_csv(
-  file = "https://www.dropbox.com/scl/fi/rdgea171s0uztwasmojkx/usa_00022.csv?rlkey=msbupznr1hq12ejf305vdk2kx&st=s1qmh2in&dl=1") |>
+  file = "https://www.dropbox.com/scl/fi/ouj5rods7i1a0jomyk7ec/usa_00027.csv?rlkey=az0lfp12oqk82b9p1uf5nk309&st=lxmzjue2&dl=1") |>
   janitor::clean_names() |>
   filter(age >= 20 & age < 45,
          school == 1) |>

@@ -528,3 +528,58 @@ boot_pmatrix_ci = function(
     se  = as.vector(se_mat)
   )
 }
+
+occ_labels = c(
+  farming    = "Farming",
+  farmer     = "Farming",      # meso uses "farmer"; macro uses "farming"
+  farmworker = "Farmworker",
+  nonemp     = "Non-employed",
+  nonmanual  = "Non-manual",
+  manual     = "Manual",
+  crafts     = "Crafts",
+  unskilled  = "Unskilled"
+)
+
+recode_occ_df = function(df, ...) {
+  vars = rlang::ensyms(...)
+  for (v in vars) {
+    df = df |> mutate(!!v := dplyr::recode(as.character(!!v), !!!occ_labels))
+  }
+  df
+}
+
+recode_occ_vec = function(vec) {
+  setNames(as.numeric(vec), dplyr::recode(names(vec), !!!occ_labels))
+}
+
+# ── Level orders (display names) ───────────────────────────────────────────────
+macro_level_order = occ_labels[c("nonemp", "nonmanual", "manual", "farming")]
+canonical_meso    = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
+meso_level_order  = occ_labels[canonical_meso]
+
+# --- Weighted proportion table ---
+
+weighted_prop_table = function(data, var) {
+  var_sym = ensym(var)
+  data |>
+    group_by(!!var_sym) |>
+    summarise(wsum = sum(w_atc_norm), .groups = "drop") |>
+    mutate(prop = wsum / sum(wsum) * 100) |>
+    select(-wsum) |>
+    arrange(!!var_sym)
+}
+
+# --- Bootstrap result cache ---
+# Pass force = force_rerun at each call site so the script-level flag is respected.
+# cache_dir defaults to "cache"; override for subfolders (e.g. "cache/employed").
+
+cache_load = function(name, expr, force = FALSE, cache_dir = "cache") {
+  path = file.path(cache_dir, paste0(name, ".rds"))
+  if (!force && file.exists(path)) {
+    message("Loading cached: ", name)
+    return(readRDS(path))
+  }
+  result = eval(expr, envir = parent.frame())
+  saveRDS(result, path)
+  result
+}
