@@ -4,13 +4,16 @@
 
 # --- Occupation classification ---
 
+occ_unclassified = c(975, 976, 977, 978, 979, 995, 997, 999)
+
 classify_meso = function(occ) {
   farmer_codes   = c(100, 123, 830)
   farmwork_codes = c(810, 820, 840)
   nonman_codes   = c(0:99, 200:290, 300:490)
   crafts_codes   = c(762, 773, 781, 782)
 
-  case_when(
+  base = case_when(
+    occ == 979        ~ NA_character_,
     occ %in% farmer_codes   ~ "farmer",
     occ %in% farmwork_codes ~ "farmworker",
     occ %in% nonman_codes   ~ "nonmanual",
@@ -678,3 +681,51 @@ plot_pi = function(vec, title_expr, levels = NULL) {
       panel.grid      = ggplot2::element_blank()
     )
 }
+
+pick_at = function(df, stub, year_col = "picked_year") {
+  cols = grep(paste0("^", stub, "_pop_\\d{4}$"), names(df), value = TRUE)
+  if (!length(cols)) {
+    warning("no ", stub, "_pop_* columns found"); return(rep(NA_integer_, nrow(df)))
+  }
+  yrs = sort(as.integer(sub(".*_pop_", "", cols)))
+  m   = as.matrix(df[paste0(stub, "_pop_", yrs)])
+  idx = match(df[[year_col]], yrs)
+  out = rep(NA_integer_, nrow(df))
+  ok  = !is.na(idx)
+  out[ok] = as.integer(m[cbind(which(ok), idx[ok])])
+  out
+}
+
+xtab_pick = function(df, stub, occ_var = "meso_pop", by_year = FALSE) {
+  d = df |> mutate(.val = pick_at(df, stub))
+
+  cat("\n=====", stub, "at picked_year — NA coverage =====\n")
+  print(d |> group_by(picked_year) |>
+          summarise(n = n(), na = sum(is.na(.val)),
+                    pct_na = round(100 * mean(is.na(.val)), 1), .groups = "drop"))
+
+  grp = if (by_year) c("picked_year", occ_var) else occ_var
+
+  d |>
+    filter(!is.na(.val)) |>
+    count(across(all_of(c(grp, ".val")))) |>
+    group_by(across(all_of(grp))) |>
+    mutate(pct = round(100 * n / sum(n), 1)) |>
+    ungroup() |>
+    rename(!!stub := .val)
+}
+
+xtab_son = function(df, var, occ_var = "meso_son") {
+  cat("\n=====", var, "by", occ_var, "=====\n")
+  cat("NA:", sum(is.na(df[[var]])), "of", nrow(df), "\n")
+  df |>
+    filter(!is.na(.data[[var]])) |>
+    count(.data[[occ_var]], .data[[var]]) |>
+    group_by(.data[[occ_var]]) |>
+    mutate(pct = round(100 * n / sum(n), 1)) |>
+    ungroup()
+}
+
+for (v in c("farm_1940", "classwkr_1940", "labforce_1940", "empstatd_1940",
+            "relate_1940", "urban_1940", "gq_1940"))
+  print(xtab_son(aian_merged, v), n = 60)

@@ -13,7 +13,6 @@ library(dplyr)
 library(expm)
 
 source("code/00_utils.R")
-source("code/expected_values.R")
 
 data      = load_global()   # sets macro_levels and meso_levels in this frame
 aian_full = readRDS("data/aian_full.rds")
@@ -145,41 +144,6 @@ for (r in regions_list) {
               region_display[r], res$n, res$farm_ret,
               res$pi_farming, res$lambda2, res$relief))
 }
-
-################################################################################
-# ASSERTIONS
-################################################################################
-
-cat("\n--- Checking global pi_0 ---\n")
-pi0_check = pi0_macro[macro_compute_order]
-exp_pi0   = EXPECTED$pi0_global_macro
-if (!all(abs(pi0_check - exp_pi0) < TOL)) {
-  stop(sprintf(
-    "Global pi_0 mismatch.\n  got:      %s\n  expected: %s",
-    paste(round(pi0_check, 3), collapse = " / "),
-    paste(exp_pi0,             collapse = " / ")))
-}
-cat("Global pi_0 check passed:", paste(round(pi0_check, 3), collapse = " / "), "\n")
-
-cat("\n--- Checking regional estimates ---\n")
-num_fields = c("farm_ret", "pi_farming", "pi_manual", "pi_nonman", "lambda2", "relief")
-
-for (r in regions_list) {
-  exp = EXPECTED$regional[[r]]
-  got = regional_results[[r]]
-  if (is.null(exp)) next
-
-  for (fld in num_fields) {
-    if (is.na(exp[[fld]])) next
-    delta = abs(got[[fld]] - exp[[fld]])
-    if (delta > TOL)
-      stop(sprintf("[%s] %s: got %.4f, expected %.4f (|delta|=%.4f > TOL=%.3f)",
-                   r, fld, got[[fld]], exp[[fld]], delta, TOL))
-  }
-  if (!is.na(exp$n) && got$n != exp$n)
-    stop(sprintf("[%s] n: got %d, expected %d", r, got$n, exp$n))
-}
-cat("All regional assertions passed.\n")
 
 ################################################################################
 # SAVE

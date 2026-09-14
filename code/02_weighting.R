@@ -7,8 +7,7 @@ source("code/00_utils.R")
 
 aian_merged = readRDS("data/aian_merged.rds") |>
   mutate(region    = assign_region(statefip_1940),
-         education = classify_education(educd_1940),
-         migration = classify_migration(migrate5_1940))
+         education = classify_education(educd_1940))
 
 aian_full = read_csv(
   file = "https://www.dropbox.com/scl/fi/ouj5rods7i1a0jomyk7ec/usa_00027.csv?rlkey=az0lfp12oqk82b9p1uf5nk309&st=lxmzjue2&dl=1") |>
@@ -17,8 +16,7 @@ aian_full = read_csv(
          school == 1) |>
   mutate(birthyr_son = 1940 - age,
          region = assign_region(statefip),
-         education = classify_education(educd),
-         migration   = classify_migration(migrate5)) |>
+         education = classify_education(educd)) |>
   rename(statefip_1940 = statefip, urban_1940 = urban)
 
 # --- Point estimate weights via compute_weights() ---
