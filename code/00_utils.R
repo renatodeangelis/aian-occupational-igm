@@ -61,15 +61,20 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
     summarise(
       birthyr_pop = first(birthyr_pop),
       birthyr_son = first(birthyr_son),
-      occ_pop     = first(occ),    # raw occ code for this observation year
-      meso = {
-        pool = if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
-          meso[!is.na(meso) & meso != "nonemp"]
+      res = {
+        keep = if (prefer_employed && any(meso != "nonemp", na.rm = TRUE))
+          which(!is.na(meso) & meso != "nonemp")
         else
-          meso[!is.na(meso)]
-        if (length(pool) == 0) NA_character_ else names(which.max(table(pool)))
+          which(!is.na(meso))
+        if (length(keep) == 0) {
+          list(meso = NA_character_, occ_pop = NA_integer_)
+        } else {
+          m = names(which.max(table(meso[keep])))
+          list(meso = m, occ_pop = occ[keep][meso[keep] == m][1])
+        }
       },
       .groups = "drop") |>
+    tidyr::unnest_wider(res) |>
     mutate(implied_age    = ifelse(!is.na(birthyr_pop), year - birthyr_pop, NA_real_),
            son_age_at_obs = year - birthyr_son) |>
     group_by(pid) |>
@@ -77,9 +82,11 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
       has_pref  = prefer_employed & any(meso != "nonemp", na.rm = TRUE),
       meso_used = if_else(has_pref & meso != "nonemp", meso,
                           if_else(has_pref, NA_character_, meso))) |>
+    ungroup() |>
     filter(!is.na(meso_used),
            is.na(implied_age) | implied_age <= 65) |>
     add_count(pid, meso_used, name = "freq") |>
+    group_by(pid) |>
     filter(freq == max(freq)) |>
     mutate(has_empstatd = year %in% c(1910, 1930, 1940),
            age_dist     = coalesce(abs(son_age_at_obs - 10), Inf))
@@ -93,6 +100,8 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
     slice_head(n = 1) |>
     ungroup() |>
     transmute(pid, meso = meso_used, year, birthyr_pop, occ_pop)
+
+  stopifnot(all(is.na(out$occ_pop) | classify_meso(out$occ_pop) == out$meso))
 }
 
 # --- Region mapping ---
