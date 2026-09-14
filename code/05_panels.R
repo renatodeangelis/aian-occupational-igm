@@ -1,14 +1,23 @@
 ################################################################################
-# Slide 7 panels
-# Panel 1 (exit_left):  farming fathers → macro_son destinations (horizontal bar)
-# Panel 2 (exit_right): farming→manual sons → empstatd_1940 (vertical bar)
-# Weight: w_trim_norm throughout
+# 05_panels.R
+# Slide 7 panels — farming-exit bar charts.
+# Panel 1 (exit_left):  farming fathers → macro_son destinations (horizontal)
+# Panel 2 (exit_right): farming→manual sons → empstatd_1940 (vertical)
+# Weight: w_trim_norm throughout (present in data after load_global()).
+#
+# Reads:  data/aian_weighted.rds  (via load_global)
+# Writes: output/figures/exit_left.{png,pdf}
+#         output/figures/exit_right.{png,pdf}
 ################################################################################
 
 library(dplyr)
 library(ggplot2)
+library(scales)
 
-data = readRDS("data/aian_weighted.rds")
+source("code/00_utils.R")
+source("code/expected_values.R")
+
+data = load_global()   # sets macro_levels / meso_levels; adds w_atc_norm = w_trim_norm
 
 # Canonical orders — both panels read from here
 macro_exit_order = c("farming", "manual", "nonemp", "nonmanual")
@@ -30,12 +39,17 @@ p1_props = setNames(
   macro_exit_order
 )
 
-stopifnot(
-  p1_props["farming"]   == 0.507,
-  p1_props["manual"]    == 0.349,
-  p1_props["nonemp"]    == 0.109,
-  p1_props["nonmanual"] == 0.035
-)
+# Assert against expected values (TOL applied to proportions)
+if (!is.null(EXPECTED$panel1) && !any(is.na(EXPECTED$panel1))) {
+  deltas = abs(p1_props[names(EXPECTED$panel1)] - EXPECTED$panel1)
+  if (any(deltas > TOL))
+    stop(sprintf("Panel 1 mismatch: max |delta| = %.4f > TOL = %.3f\n  got: %s\n  exp: %s",
+                 max(deltas),
+                 TOL,
+                 paste(round(p1_props, 3), collapse = " / "),
+                 paste(EXPECTED$panel1,   collapse = " / ")))
+}
+cat("Panel 1 proportions:", paste(names(p1_props), round(p1_props, 3), sep = "=", collapse = "  "), "\n")
 
 p1_data = tibble(
   cat    = factor(macro_exit_order, levels = macro_exit_order),
@@ -45,7 +59,6 @@ p1_data = tibble(
   xmid   = (xstart + xend) / 2
 )
 
-# Greyscale: darkest (farming) → lightest (nonmanual)
 p1_fills = c(
   farming   = "#282828",
   manual    = "#696969",
@@ -56,27 +69,22 @@ p1_fills = c(
 panel1 = ggplot(p1_data) +
   geom_rect(aes(xmin = xstart, xmax = xend, ymin = 0, ymax = 1, fill = cat),
             colour = NA) +
-  # Labels inside the three wide segments (white text)
   geom_text(
     data  = filter(p1_data, cat != "nonmanual"),
     aes(x = xmid, y = 0.5, label = sprintf("%.3f", prop)),
     colour = "white", size = 3.8, fontface = "bold"
   ) +
-  # Thin leader line from nonmanual right edge into right margin
   geom_segment(
     data = filter(p1_data, cat == "nonmanual"),
     aes(x = xend + 0.004, xend = 1.048, y = 0.5, yend = 0.5),
     linewidth = 0.35, colour = "#282828"
   ) +
-  # Outside label for nonmanual
   geom_text(
     data  = filter(p1_data, cat == "nonmanual"),
     aes(x = 1.053, y = 0.5, label = sprintf("%.3f", prop)),
     colour = "#282828", size = 3.8, fontface = "bold", hjust = 0
   ) +
   scale_fill_manual(values = p1_fills) +
-  # oob_keep passes out-of-bounds coords through so the outside label and leader
-  # line are not silently dropped before coord_cartesian(clip="off") can draw them
   scale_x_continuous(limits = c(0, 1), expand = c(0, 0),
                      oob = scales::oob_keep) +
   scale_y_continuous(expand = c(0, 0)) +
@@ -96,11 +104,11 @@ panel1 = ggplot(p1_data) +
 p2_raw = data |>
   filter(macro_pop == "farming", macro_son == "manual") |>
   mutate(emp_grp = case_when(
-    empstatd_1940 == 10                       ~ "10",
-    empstatd_1940 == 11                       ~ "11",
-    empstatd_1940 == 21                       ~ "21",
-    empstatd_1940 %in% residual_codes         ~ "other",
-    TRUE                                      ~ NA_character_
+    empstatd_1940 == 10                ~ "10",
+    empstatd_1940 == 11                ~ "11",
+    empstatd_1940 == 21                ~ "21",
+    empstatd_1940 %in% residual_codes  ~ "other",
+    TRUE                               ~ NA_character_
   )) |>
   filter(!is.na(emp_grp)) |>
   group_by(emp_grp) |>
@@ -112,12 +120,16 @@ p2_props = setNames(
   emp_order
 )
 
-stopifnot(
-  p2_props["10"]    == 0.425,
-  p2_props["11"]    == 0.387,
-  p2_props["21"]    == 0.135,
-  p2_props["other"] == 0.053
-)
+if (!is.null(EXPECTED$panel2) && !any(is.na(EXPECTED$panel2))) {
+  deltas = abs(p2_props[names(EXPECTED$panel2)] - EXPECTED$panel2)
+  if (any(deltas > TOL))
+    stop(sprintf("Panel 2 mismatch: max |delta| = %.4f > TOL = %.3f\n  got: %s\n  exp: %s",
+                 max(deltas),
+                 TOL,
+                 paste(round(p2_props, 3), collapse = " / "),
+                 paste(EXPECTED$panel2,   collapse = " / ")))
+}
+cat("Panel 2 proportions:", paste(names(p2_props), round(p2_props, 3), sep = "=", collapse = "  "), "\n")
 
 p2_data = tibble(
   cat    = factor(emp_order, levels = emp_order),
@@ -125,11 +137,9 @@ p2_data = tibble(
   yend   = cumsum(prop),
   ystart = lag(yend, default = 0),
   ymid   = (ystart + yend) / 2,
-  # White text on dark/accent fills; dark text on light fill
   lcol   = if_else(cat == "other", "#282828", "white")
 )
 
-# Greyscale except code 11 (accent)
 p2_fills = c(
   "10"    = "#696969",
   "11"    = "#9E2B25",

@@ -3,7 +3,7 @@ library(readr)
 library(tidyr)
 library(janitor)
 
-source("code/utils.R")
+source("code/00_utils.R")
 
 aian = 3
 pop_years = c(1910, 1920, 1930, 1940)
@@ -111,7 +111,7 @@ cat("\nFather-year coverage (drives the single-observation problem):\n")
 print(aian_clean |>
         summarise(across(matches("^occ1950_pop_\\d{4}$"), ~ sum(!is.na(.x)))) |>
         pivot_longer(everything(), names_to = "col", values_to = "n"))
- 
+
 n_obs = aian_clean |>
   transmute(k = rowSums(!is.na(pick(matches("^occ1950_pop_\\d{4}$")))))
 cat("\nFather observations per son:\n")
@@ -171,6 +171,7 @@ aian_merged = aian_clean |>
   relocate(spread_flag, .after = spread_mad) |>
   relocate(meso_pop, .after = picked_year) |>
   relocate(macro_pop, .after = meso_pop) |>
+  relocate(occ_pop, .after = macro_pop) |>
   relocate(starts_with("macro_son"), .after = occ_son) |>
   relocate(starts_with("meso_son"), .after = macro_son) |>
   relocate(lit_son, .after = educd_1940) |>
