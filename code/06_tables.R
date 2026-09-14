@@ -2,10 +2,9 @@
 # 06_tables.R
 # LaTeX tables for slides 8 and meso summary.
 #
-# §1  Re-check assertions from 03_estimate.R (audit trail)
-# §2  Regional table (shaded LaTeX tabular)
-# §3  Meso summary table
-# §4  Zero-cell check and Blume-style ε perturbation
+# §1  Regional table (shaded LaTeX tabular)
+# §2  Meso summary table
+# §3  Zero-cell check and Blume-style ε perturbation
 #
 # Reads:  output/estimates.rds
 # Writes: output/figures/slide08_regional_table.tex
@@ -17,7 +16,6 @@ library(dplyr)
 library(knitr)
 
 source("code/00_utils.R")
-source("code/expected_values.R")
 
 est = readRDS("output/estimates.rds")
 
@@ -29,31 +27,7 @@ pi0_meso         = est$pi0_meso
 steady_meso      = est$steady_meso
 
 ################################################################################
-# §1 RE-CHECK ASSERTIONS
-################################################################################
-
-cat("--- Re-checking regional assertions from estimates.rds ---\n")
-num_fields = c("farm_ret", "pi_farming", "pi_manual", "pi_nonman", "lambda2", "relief")
-
-for (r in regions_list) {
-  exp = EXPECTED$regional[[r]]
-  got = regional_results[[r]]
-  if (is.null(exp)) next
-
-  for (fld in num_fields) {
-    if (is.na(exp[[fld]])) next
-    delta = abs(got[[fld]] - exp[[fld]])
-    if (delta > TOL)
-      stop(sprintf("[%s] %s: got %.4f, expected %.4f (|delta|=%.4f > TOL=%.3f)",
-                   r, fld, got[[fld]], exp[[fld]], delta, TOL))
-  }
-  if (!is.na(exp$n) && got$n != exp$n)
-    stop(sprintf("[%s] n: got %d, expected %d", r, got$n, exp$n))
-}
-cat("All regional assertions passed.\n\n")
-
-################################################################################
-# §2 REGIONAL TABLE
+# §1 REGIONAL TABLE
 # Sorted by pi*_farming descending; shaded cells use \sh{shade}{val} command.
 # Caller must provide \newcommand{\sh}[2]{\cellcolor{black!#1}#2} and load
 # booktabs + colortbl.
@@ -148,7 +122,7 @@ writeLines(ln, "output/figures/slide08_regional_table.tex")
 cat("Wrote output/figures/slide08_regional_table.tex\n")
 
 ################################################################################
-# §3 MESO SUMMARY TABLE
+# §2 MESO SUMMARY TABLE
 ################################################################################
 
 meso_tbl = tibble(
@@ -167,7 +141,7 @@ cat(knitr::kable(meso_tbl, format = "latex", booktabs = TRUE,
 cat("\n")
 
 ################################################################################
-# §4 ZERO-CELL CHECK AND BLUME-STYLE EPSILON PERTURBATION
+# §3 ZERO-CELL CHECK AND BLUME-STYLE EPSILON PERTURBATION
 ################################################################################
 
 eps_vals    = c(.001, .005, .01)

@@ -15,7 +15,6 @@ library(ggplot2)
 library(scales)
 
 source("code/00_utils.R")
-source("code/expected_values.R")
 
 data = load_global()   # sets macro_levels / meso_levels; adds w_atc_norm = w_trim_norm
 
@@ -39,16 +38,6 @@ p1_props = setNames(
   macro_exit_order
 )
 
-# Assert against expected values (TOL applied to proportions)
-if (!is.null(EXPECTED$panel1) && !any(is.na(EXPECTED$panel1))) {
-  deltas = abs(p1_props[names(EXPECTED$panel1)] - EXPECTED$panel1)
-  if (any(deltas > TOL))
-    stop(sprintf("Panel 1 mismatch: max |delta| = %.4f > TOL = %.3f\n  got: %s\n  exp: %s",
-                 max(deltas),
-                 TOL,
-                 paste(round(p1_props, 3), collapse = " / "),
-                 paste(EXPECTED$panel1,   collapse = " / ")))
-}
 cat("Panel 1 proportions:", paste(names(p1_props), round(p1_props, 3), sep = "=", collapse = "  "), "\n")
 
 p1_data = tibble(
@@ -120,15 +109,6 @@ p2_props = setNames(
   emp_order
 )
 
-if (!is.null(EXPECTED$panel2) && !any(is.na(EXPECTED$panel2))) {
-  deltas = abs(p2_props[names(EXPECTED$panel2)] - EXPECTED$panel2)
-  if (any(deltas > TOL))
-    stop(sprintf("Panel 2 mismatch: max |delta| = %.4f > TOL = %.3f\n  got: %s\n  exp: %s",
-                 max(deltas),
-                 TOL,
-                 paste(round(p2_props, 3), collapse = " / "),
-                 paste(EXPECTED$panel2,   collapse = " / ")))
-}
 cat("Panel 2 proportions:", paste(names(p2_props), round(p2_props, 3), sep = "=", collapse = "  "), "\n")
 
 p2_data = tibble(

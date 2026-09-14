@@ -13,13 +13,14 @@ son_multiyear = c("lit", "gq", "gqtype", "school", "relate", "age",
                   "statefip", "speakeng", "occ1950")
 son_1940only  = c("educ", "educd", "sex", "countyicp", "urban", "metro",
                   "empstat", "empstatd", "labforce", "classwkr", "ind1950",
-                  "farm", "ownershp", "marst", "bpl", "birthyr",
+                  "farm", "ownershp", "marst", "bpl", "birthyr", "classwkrd",
                   "wkswork1", "hrswork1", "hrswork2", "durunemp",
                   "incwage", "incnonwg", "migrate5", "migrate5d", "migplac5")
 pop_multiyear = c("histid", "hik", "age", "birthyr", "occ1950", "ind1950",
                   "classwkr", "labforce", "empstat", "empstatd", "lit",
                   "speakeng", "farm", "ownershp", "gq", "gqtype", "relate",
-                  "marst", "bpl", "educd", "statefip", "countyicp", "urban")
+                  "marst", "bpl", "educd", "statefip", "countyicp", "urban",
+                  "wkswork1", "durunemp", "incwage", "classwkrd")
 
 path = "https://www.dropbox.com/scl/fi/q4725zk5qw3ltruiucwgc/usa_00026.csv?rlkey=vzauffbwyj61upzhb4fezbq5c&st=y9467v1h&dl=1"
 
@@ -143,7 +144,7 @@ aian_merged = aian_clean |>
   left_join(modal_meso_pop, by = "pid") |>
   left_join(aian_age |> select(pid, birthyr_spread = spread, spread_mad), by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
-  select(-pid, -starts_with("age"), -starts_with("occ1950_pop")) |>
+  select(-starts_with("age"), -starts_with("occ1950_pop")) |>
   filter(!is.na(meso_pop)) |>
   (\(x) { cat("After missing meso_pop drop:", nrow(x), "father-son pairs\n"); x })() |>
   filter(is.na(spread_mad) | spread_mad <= 4) |>
