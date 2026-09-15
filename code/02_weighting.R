@@ -50,8 +50,8 @@ n_outside_cs = sum(aian_ps$p_hat < cs_lower | aian_ps$p_hat > cs_upper)
 cat("Linked obs outside common support:", n_outside_cs, "of", nrow(aian_ps),
     sprintf("(%.1f%%)\n", 100 * n_outside_cs / nrow(aian_ps)))
 
-# --- 2.5 fix: Weight trimming and diagnostics ---
-cat("\n--- Weight diagnostics (untrimmed) ---\n")
+# --- Weight diagnostics ---
+cat("\n--- Weight diagnostics ---\n")
 cat("Summary of w_atc_norm:\n")
 print(summary(aian_ps$w_atc_norm))
 
@@ -59,22 +59,9 @@ ess_global = sum(aian_ps$w_atc_norm)^2 / sum(aian_ps$w_atc_norm^2)
 cat("Effective sample size:", round(ess_global, 1),
     "of", nrow(aian_ps), "observations\n")
 
-trim_threshold = quantile(aian_ps$w_atc, 0.99)
-cat("99th percentile trim threshold:", round(trim_threshold, 3), "\n")
-cat("Observations trimmed:", sum(aian_ps$w_atc > trim_threshold), "\n")
-
-aian_ps = aian_ps |>
-  mutate(w_trim = pmin(w_atc, trim_threshold),
-         w_trim_norm = w_trim * n() / sum(w_trim))
-
-ess_trimmed = sum(aian_ps$w_trim_norm)^2 / sum(aian_ps$w_trim_norm^2)
-cat("ESS after trimming:", round(ess_trimmed, 1), "\n")
-
 # --- Covariate balance diagnostics ---
 aian_comb_bal = aian_comb |>
-  mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm)) |>
-  left_join(aian_ps |> select(histid_1940, w_trim_norm), by = "histid_1940") |>
-  mutate(w_trim_norm = if_else(linked == 0, 1, w_trim_norm))
+  mutate(w_atc_norm = if_else(linked == 0, 1, w_atc_norm))
 
 # --- Balance: untrimmed weights ---
 bt = bal.tab(linked ~ cohort + region + education + urban_1940,
@@ -85,20 +72,12 @@ cat("\n--- Covariate balance (untrimmed weights) ---\n")
 print(bt)
 dir.create("output", showWarnings = FALSE)
 
-# --- Balance: trimmed weights (what goes into analysis) ---
-bt_trim = bal.tab(linked ~ cohort + region + education + urban_1940,
-                  data = aian_comb_bal, weights = "w_trim_norm",
-                  method = "weighting", estimand = "ATC",
-                  un = FALSE)
-cat("\n--- Covariate balance (trimmed weights) ---\n")
-print(bt_trim)
-
 bt_state = bal.tab(linked ~ statefip_1940,
-                   data = aian_comb_bal, weights = "w_trim_norm",
+                   data = aian_comb_bal, weights = "w_atc_norm",
                    method = "weighting", estimand = "ATC",
                    un = TRUE)
 state_smds = bt_state$Balance$Diff.Adj
-cat("\n--- State balance summary (trimmed weights) ---\n")
+cat("\n--- State balance summary ---\n")
 cat("State balance — max |SMD|:", round(max(abs(state_smds)), 3),
     " mean |SMD|:", round(mean(abs(state_smds)), 3), "\n")
 if (any(abs(state_smds) > 0.2)) {
@@ -109,10 +88,10 @@ if (any(abs(state_smds) > 0.2)) {
 
 # --- Finalize and write ---
 aian_ps = aian_ps |>
-  select(-p_hat, -w_atc, -w_trim) |>
+  select(-p_hat, -w_atc) |>
   select(where(~ !all(is.na(.)))) |>
   relocate(starts_with("w_parent"), .after = last_col()) |>
-  relocate(w_atc_norm, w_trim_norm, .before = starts_with("w_parent"))
+  relocate(w_atc_norm, .before = starts_with("w_parent"))
 
 saveRDS(aian_ps, "data/aian_weighted.rds")
 
@@ -128,7 +107,7 @@ for (reg in regions) {
   full_r   = filter(aian_full,   region == reg)
 
   w_out = compute_weights(linked_r, full_r, ps_formula = regional_formula)
-  regional_weighted[[reg]] = trim_weights_top1(w_out$data)
+  regional_weighted[[reg]] = w_out$data
 
   ess = with(regional_weighted[[reg]], sum(w_atc_norm)^2 / sum(w_atc_norm^2))
   cat(reg, "— ESS:", round(ess, 1), "of", nrow(regional_weighted[[reg]]), "\n")

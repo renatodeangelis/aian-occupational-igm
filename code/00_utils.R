@@ -4,8 +4,6 @@
 
 # --- Occupation classification ---
 
-occ_unclassified = c(975, 976, 977, 978, 979, 995, 997, 999)
-
 classify_meso = function(occ) {
   farmer_codes   = c(100, 123, 830)
   farmwork_codes = c(810, 820, 840)
@@ -21,6 +19,7 @@ classify_meso = function(occ) {
     occ %in% 595:970 & !(occ %in% crafts_codes) & !(occ %in% farmwork_codes) ~ "unskilled",
     occ > 970 ~ "nonemp"
   )
+  base
 }
 
 classify_macro = function(meso) {
@@ -37,7 +36,7 @@ meso_order          = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworke
 
 # Alphabetical order — matches p_matrix() output (which uses sort(union(...))).
 # Use when indexing P by name to avoid positional errors.
-macro_compute_order = c("farming", "manual", "nonmanual", "nonemp")
+macro_compute_order = c("nonemp", "nonmanual", "manual", "farming")
 
 # --- Modal occupation picker ---
 
@@ -141,8 +140,8 @@ compute_weights = function(df_linked, df_full,
   ) |>
     dplyr::mutate(
       cohort    = cut(birthyr_son,
-                      breaks = c(1895, 1900, 1905, 1910, 1915, 1921),
-                      labels = c("1896-1900", "1901-1905", "1906-1910",
+                      breaks = c(1890, 1895, 1900, 1905, 1910, 1915, 1921),
+                      labels = c("1891-1895", "1896-1900", "1901-1905", "1906-1910",
                                  "1911-1915", "1916-1920")),
       region    = as.factor(region),
       education = as.factor(education))
@@ -167,24 +166,8 @@ compute_weights = function(df_linked, df_full,
 
 # --- Top-1% weight trimmer ---
 #
-# WHY THIS EXISTS:
-#   compute_weights() returns raw ATC weights (w_atc) and a naive normalisation
-#   (w_atc_norm). The main analysis pipeline in weighting.R additionally trims
-#   extreme weights at the 99th percentile before renormalising. Any bootstrap
-#   that re-estimates weights on each resample must apply the same trim, or the
-#   distribution of bootstrap draws will be broader than the estimator it is
-#   approximating — inflating SEs.
-#
-# DESIGN CHOICES:
-#   - Trim is applied to w_atc (raw, pre-normalisation), matching weighting.R
-#     lines 69-75. Trimming w_atc_norm instead would shift the threshold each
-#     time the sample size changes, making resamples non-comparable.
-#   - The 99th-percentile threshold is recomputed per call (i.e., per resample)
-#     rather than being fixed to the full-sample threshold. This is correct:
-#     each draw has its own weight distribution, and the trim should be
-#     calibrated to that draw's distribution.
-#   - The function overwrites w_atc_norm in place so downstream functions
-#     (p_matrix, pi_0) pick up trimmed weights without any argument changes.
+# Kept for appendix robustness checks; the main analysis uses untrimmed weights.
+# Trims w_atc at its 99th percentile and renormalises w_atc_norm in place.
 #
 # ASSUMPTION:
 #   df has columns w_atc and w_atc_norm — i.e., it is compute_weights()$data.
@@ -209,11 +192,10 @@ renorm = function(df) {
 load_global = function(path = "data/aian_weighted.rds") {
   assign("macro_levels", macro_compute_order, envir = parent.frame())
   assign("meso_levels",  meso_order,          envir = parent.frame())
-  readRDS(path) |> dplyr::mutate(w_atc_norm = w_trim_norm)
+  readRDS(path)
 }
 
-# Load per-region weighted datasets. Regional data already has w_atc_norm set
-# to trimmed weights by 02_weighting.R — do NOT apply mutate(w_atc_norm = w_trim_norm).
+# Load per-region weighted datasets.
 load_regional = function(path = "data/aian_regional_weighted.rds") {
   readRDS(path)
 }
@@ -417,6 +399,8 @@ d_prime = function(data, level_dad, level_son, t = 1) {
 am = function(data, level_dad, level_son, t = 1) {
   pi_init = pi_0(data, {{ level_dad }})
   P_mat   = p_matrix(data, {{ level_dad }}, {{ level_son }})
+  pi_init = pi_init[rownames(P_mat)]
+  stopifnot(!any(is.na(pi_init)))
   pi_s    = pi_star(P_mat)
   P_t  = P_mat %^% t
   pi_t = as.numeric(pi_init %*% P_t)
@@ -476,42 +460,48 @@ dprime_generator = function(P_t) {
   list(pairs = pairs_named, value = best)
 }
 
-# --- Bootstrap SE for transition matrix cells ---
+# --- Bootstrap for global transition matrix, pi*, and delta(P) ---
 #
-# WHY THIS REPLACES THE OLD boot_pmatrix_ci:
-#   The previous version resampled the pre-weighted data object and reused fixed
-#   weights. This understates SEs because propensity score estimation uncertainty
-#   is not propagated. The fix is to re-run compute_weights() on every resample,
-#   then trim, so each draw reflects the full estimator including weight
-#   uncertainty.
+# Clusters on pid (family), re-runs compute_weights() on each draw so PS
+# uncertainty is propagated. Returns percentile intervals.
 #
-# SCOPE:
-#   Returns standard errors only — not confidence intervals. SEs are the only
-#   bootstrap output used for the transition matrix tables. Percentile CIs would
-#   require R ≥ 1000 and are not needed here; sd() across draws converges faster.
+# Return value: list with
+#   $P    — tibble(dad, son, est, lo, hi)
+#   $pi_s — tibble(state, est, lo, hi)
+#   $d1   — named vector c(est, lo, hi)  [log scale, matches dobrushin()$d1]
 
 boot_pmatrix_ci = function(
     data, level_dad, level_son,
     df_linked, df_full,
-    R = 500, .seed = NULL,
-    mc.cores = 1L) {
+    R = 2000, .seed = NULL,
+    mc.cores = 1L,
+    pid_col = "pid",
+    alpha = 0.05) {
 
   if (!is.null(.seed)) set.seed(.seed)
   dad_sym = rlang::ensym(level_dad)
   son_sym = rlang::ensym(level_son)
-  N = nrow(df_linked)
 
-  w_full = compute_weights(df_linked, df_full)
-  d_full = trim_weights_top1(w_full$data)
-  P_hat  = p_matrix(d_full, !!dad_sym, !!son_sym, matrix = TRUE)
-  rnames = rownames(P_hat); cnames = colnames(P_hat)
-  nR = nrow(P_hat); nC = ncol(P_hat)
+  # Precompute cluster index once — O(N) lookup amortised across all draws
+  pid_idx = split(seq_len(nrow(df_linked)), df_linked[[pid_col]])
+  fams    = names(pid_idx)
+
+  # Point estimates
+  w_full     = compute_weights(df_linked, df_full)
+  d_full     = w_full$data
+  P_hat      = p_matrix(d_full, !!dad_sym, !!son_sym, matrix = TRUE)
+  rnames     = rownames(P_hat); cnames = colnames(P_hat)
+  nR         = nrow(P_hat);    nC     = ncol(P_hat)
+  pistar_hat = pi_star(P_hat)
+  d1_hat     = dobrushin(P_hat)$d1
 
   boot_once = function() {
-    idx = sample.int(N, N, replace = TRUE)
-    w_b = compute_weights(df_linked[idx, ], df_full)
-    d_b = trim_weights_top1(w_b$data)
-    p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
+    fam_b = sample(fams, length(fams), replace = TRUE)
+    idx   = unlist(pid_idx[fam_b], use.names = FALSE)
+    w_b   = compute_weights(df_linked[idx, ], df_full)
+    d_b   = w_b$data
+    P_b   = p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
+    list(P = P_b, pi_s = pi_star(P_b), d1 = dobrushin(P_b)$d1)
   }
 
   boots = if (mc.cores > 1L) {
@@ -519,16 +509,114 @@ boot_pmatrix_ci = function(
   } else {
     lapply(seq_len(R), function(i) boot_once())
   }
-  arr   = simplify2array(boots)
 
-  se_mat = apply(arr, c(1, 2), sd, na.rm = TRUE)
+  arr_P    = simplify2array(lapply(boots, `[[`, "P"))
+  mat_pi_s = do.call(rbind, lapply(boots, `[[`, "pi_s"))
+  d1_draws = sapply(boots, `[[`, "d1")
 
-  tibble::tibble(
-    !!dad_sym := rep(rnames, times = nC),
-    !!son_sym := rep(cnames, each  = nR),
-    est = as.vector(P_hat),
-    se  = as.vector(se_mat)
+  lo_p = alpha / 2; hi_p = 1 - alpha / 2
+
+  P_lo = apply(arr_P, c(1, 2), quantile, probs = lo_p, na.rm = TRUE)
+  P_hi = apply(arr_P, c(1, 2), quantile, probs = hi_p, na.rm = TRUE)
+
+  list(
+    P = tibble::tibble(
+      !!dad_sym := rep(rnames, times = nC),
+      !!son_sym := rep(cnames, each  = nR),
+      est = as.vector(P_hat),
+      lo  = as.vector(P_lo),
+      hi  = as.vector(P_hi)
+    ),
+    pi_s = tibble::tibble(
+      state = names(pistar_hat),
+      est   = as.numeric(pistar_hat),
+      lo    = apply(mat_pi_s, 2, quantile, probs = lo_p, na.rm = TRUE),
+      hi    = apply(mat_pi_s, 2, quantile, probs = hi_p, na.rm = TRUE)
+    ),
+    d1 = c(
+      est = d1_hat,
+      lo  = quantile(d1_draws, lo_p, na.rm = TRUE),
+      hi  = quantile(d1_draws, hi_p, na.rm = TRUE)
+    )
   )
+}
+
+# --- Bootstrap for regional counterfactuals (regime_k, comp_k) ---
+#
+# Fixed-weight bootstrap: resamples rows (clustered on pid) within each region
+# and renormalises existing weights. Does NOT refit the PS model — national P
+# and pi0 are held fixed at their point estimates.
+#
+# Return value: tibble with columns
+#   region, n, regime, regime_lo, regime_hi, comp, comp_lo, comp_hi, total
+
+boot_regional_cf = function(
+    regional_data, P_nat, pi0_nat,
+    level_dad, level_son,
+    exclude  = NULL,
+    R        = 2000,
+    .seed    = NULL,
+    mc.cores = 1L,
+    pid_col  = "pid",
+    alpha    = 0.05) {
+
+  if (!is.null(exclude))
+    regional_data = regional_data[!names(regional_data) %in% exclude]
+
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
+
+  if (!is.null(.seed)) set.seed(.seed)
+
+  purrr::imap_dfr(regional_data, function(d, reg) {
+    d = renorm(d)
+
+    P_k   = p_matrix(d, !!dad_sym, !!son_sym)
+    pi0_k = pi_0(d, !!dad_sym)
+    P_k   = P_k[rownames(P_nat), colnames(P_nat), drop = FALSE]
+    stopifnot(identical(dim(P_k), dim(P_nat)))
+
+    regime_hat = sdm1(pi0_k, P_k,   pi0_k,   P_nat)
+    comp_hat   = sdm1(pi0_k, P_nat, pi0_nat, P_nat)
+    total_hat  = sdm1(pi0_k, P_k,   pi0_nat, P_nat)
+
+    pid_idx = split(seq_len(nrow(d)), d[[pid_col]])
+    fams    = names(pid_idx)
+
+    boot_once = function() {
+      fam_b = sample(fams, length(fams), replace = TRUE)
+      idx   = unlist(pid_idx[fam_b], use.names = FALSE)
+      d_b   = renorm(d[idx, ])
+      P_b   = p_matrix(d_b, !!dad_sym, !!son_sym)
+      if (!all(rownames(P_nat) %in% rownames(P_b)))
+        return(c(regime = NA_real_, comp = NA_real_))
+      P_b   = P_b[rownames(P_nat), colnames(P_nat), drop = FALSE]
+      pi0_b = pi_0(d_b, !!dad_sym)
+      c(regime = sdm1(pi0_b, P_b,   pi0_b,   P_nat),
+        comp   = sdm1(pi0_b, P_nat, pi0_nat, P_nat))
+    }
+
+    boots = if (mc.cores > 1L) {
+      parallel::mclapply(seq_len(R), function(i) boot_once(), mc.cores = mc.cores)
+    } else {
+      lapply(seq_len(R), function(i) boot_once())
+    }
+
+    arr  = do.call(rbind, boots)
+    lo_p = alpha / 2; hi_p = 1 - alpha / 2
+
+    tibble::tibble(
+      region    = reg,
+      n         = nrow(d),
+      regime    = regime_hat,
+      regime_lo = quantile(arr[, "regime"], lo_p, na.rm = TRUE),
+      regime_hi = quantile(arr[, "regime"], hi_p, na.rm = TRUE),
+      comp      = comp_hat,
+      comp_lo   = quantile(arr[, "comp"], lo_p, na.rm = TRUE),
+      comp_hi   = quantile(arr[, "comp"], hi_p, na.rm = TRUE),
+      total     = total_hat
+    )
+  })
 }
 
 # --- Occupation labels and recoding ---
@@ -577,11 +665,88 @@ dobrushin = function(P) {
   ij       = idx[, worst]
   rn       = rownames(P)
   list(
-    d1      = 1 - overlaps[worst],
+    d1      = log(1 - overlaps[worst]),
     row1    = if (!is.null(rn)) rn[ij[1]] else ij[1],
     row2    = if (!is.null(rn)) rn[ij[2]] else ij[2],
     overlap = pmin(P[ij[1], ], P[ij[2], ])
   )
+}
+
+# --- Pairwise TV distances between rows of P ---
+#
+# row_dists(P)[i,j] = TV(P[i,], P[j,]).
+# Sanity: max(row_dists(P)) == exp(dobrushin(P)$d1) to floating precision.
+
+row_dists = function(P) {
+  P = as.matrix(P)
+  k = nrow(P)
+  out = matrix(NA_real_, k, k, dimnames = list(rownames(P), rownames(P)))
+  for (i in seq_len(k)) for (j in seq_len(k)) out[i, j] = tv_norm(P[i, ], P[j, ])
+  out
+}
+
+# pi0-weighted average pairwise row distance; thin origins receive small weight
+# and do not dominate the way they do in the maximand delta(P).
+# Not in either anchor paper — define in prose if used.
+avg_row_dist = function(P, pi0) {
+  pi0 = pi0[rownames(as.matrix(P))]
+  stopifnot(!any(is.na(pi0)))
+  sum(outer(pi0, pi0) * row_dists(P))
+}
+
+# --- Single-period SDM (Blume et al. 2025, eq 7 at t = 1) ---
+#
+# TV distance between the son distributions generated by two chains:
+# (pi0_a, P_a) and (pi0_b, P_b).  States must be identically ordered.
+
+sdm1 = function(pi0_a, P_a, pi0_b, P_b) {
+  P_a   = as.matrix(P_a);   P_b   = as.matrix(P_b)
+  pi0_a = pi0_a[rownames(P_a)]; pi0_b = pi0_b[rownames(P_b)]
+  stopifnot(!any(is.na(pi0_a)), !any(is.na(pi0_b)))
+  stopifnot(identical(rownames(P_a), rownames(P_b)))
+  tv_norm(as.numeric(pi0_a %*% P_a), as.numeric(pi0_b %*% P_b))
+}
+
+# --- Regional counterfactuals (region-vs-national, macro only) ---
+#
+# For each region k (South excluded by default via `exclude`):
+#   regime_k: given the fathers region k actually had, how differently did its
+#             own transition regime place their sons vs the national regime?
+#   comp_k:   how much of regional distinctiveness traces to having different
+#             fathers (composition), holding the regime at national?
+#   total_k:  SDM between the region's actual chain and the national chain.
+#
+# These are two counterfactual comparisons, NOT additive decomposition
+# components (TV is a norm; regime + comp != total in general).
+#
+# Requires macro_levels / meso_levels in the calling frame (set by load_global).
+
+regional_counterfactuals = function(regional_data, data_nat,
+                                    level_dad, level_son,
+                                    exclude = NULL) {
+  dad_sym = rlang::ensym(level_dad)
+  son_sym = rlang::ensym(level_son)
+
+  P_nat   = p_matrix(data_nat, !!dad_sym, !!son_sym)
+  pi0_nat = pi_0(data_nat, !!dad_sym)
+
+  if (!is.null(exclude))
+    regional_data = regional_data[!names(regional_data) %in% exclude]
+
+  purrr::imap_dfr(regional_data, function(d, reg) {
+    d     = renorm(d)
+    P_k   = p_matrix(d, !!dad_sym, !!son_sym)
+    pi0_k = pi_0(d, !!dad_sym)
+    P_k   = P_k[rownames(P_nat), colnames(P_nat), drop = FALSE]
+    stopifnot(identical(dim(P_k), dim(P_nat)))
+    tibble::tibble(
+      region = reg,
+      n      = nrow(d),
+      regime = sdm1(pi0_k, P_k,   pi0_k,   P_nat),
+      comp   = sdm1(pi0_k, P_nat, pi0_nat, P_nat),
+      total  = sdm1(pi0_k, P_k,   pi0_nat, P_nat)
+    )
+  })
 }
 
 # --- Long-format matrix helper ---

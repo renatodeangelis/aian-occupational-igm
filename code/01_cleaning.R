@@ -66,6 +66,36 @@ father_records = father_records |>
   mutate(pid = coalesce(first(na_if(dad_hik, "")), paste0("s_", son_hik))) |>
   ungroup()
 
+# HIK-based lookup: recover father records for years when son was not co-residing.
+# dad_hik_map maps each known father hik to the son(s) it belongs to and the pid.
+dad_hik_map = father_records |>
+  filter(!is.na(dad_hik), dad_hik != "") |>
+  distinct(son_hik, dad_hik, pid)
+
+hik_extra = raw |>
+  filter(year %in% pop_years,
+         hik %in% unique(dad_hik_map$dad_hik),
+         sex == 1) |>
+  inner_join(dad_hik_map, by = c("hik" = "dad_hik"),
+             relationship = "many-to-many") |>
+  mutate(.source = "hik") |>
+  rename_with(~ paste0("dad_", .x), -c(son_hik, pid, year, .source))
+
+cat(sprintf(
+  "HIK lookup: %d father-year records found, %d unique fathers, %d unique sons\n",
+  nrow(hik_extra),
+  n_distinct(hik_extra$dad_hik),
+  n_distinct(hik_extra$son_hik)))
+
+# Bind poploc-derived and hik-derived records.
+# arrange(desc(.source)) puts "poploc" before "hik" so widen()'s slice_head()
+# keeps the poploc-validated row when both sources find the same father-year.
+father_records = father_records |>
+  mutate(.source = "poploc") |>
+  bind_rows(hik_extra) |>
+  arrange(desc(.source)) |>
+  select(-.source)
+
 widen = function(df, vars, years, suffix, id) {
   vars = intersect(vars, names(df))
   df |>
@@ -82,6 +112,7 @@ son_wide = son_records |>
   widen(union(son_multiyear, son_1940only), son_years, "_", "son_hik")
 
 pop_wide = father_records |>
+  select(son_hik, year, pid, starts_with("dad_")) |>
   rename_with(~ sub("^dad_", "", .x)) |>
   widen(pop_multiyear, pop_years, "_pop_", "son_hik")
 

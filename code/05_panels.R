@@ -3,7 +3,7 @@
 # Slide 7 panels — farming-exit bar charts.
 # Panel 1 (exit_left):  farming fathers → macro_son destinations (horizontal)
 # Panel 2 (exit_right): farming→manual sons → empstatd_1940 (vertical)
-# Weight: w_trim_norm throughout (present in data after load_global()).
+# Weight: w_atc_norm throughout (present in data after load_global()).
 #
 # Reads:  data/aian_weighted.rds  (via load_global)
 # Writes: output/figures/exit_left.{png,pdf}
@@ -16,7 +16,7 @@ library(scales)
 
 source("code/00_utils.R")
 
-data = load_global()   # sets macro_levels / meso_levels; adds w_atc_norm = w_trim_norm
+data = load_global()   # sets macro_levels / meso_levels
 
 # Canonical orders — both panels read from here
 macro_exit_order = c("farming", "manual", "nonemp", "nonmanual")
@@ -30,7 +30,7 @@ residual_codes   = c(12, 13, 31, 32, 33, 34)
 p1_raw = data |>
   filter(macro_pop == "farming") |>
   group_by(macro_son) |>
-  summarise(w = sum(w_trim_norm), .groups = "drop") |>
+  summarise(w = sum(w_atc_norm), .groups = "drop") |>
   mutate(prop = w / sum(w))
 
 p1_props = setNames(
@@ -101,7 +101,7 @@ p2_raw = data |>
   )) |>
   filter(!is.na(emp_grp)) |>
   group_by(emp_grp) |>
-  summarise(w = sum(w_trim_norm), .groups = "drop") |>
+  summarise(w = sum(w_atc_norm), .groups = "drop") |>
   mutate(prop = w / sum(w))
 
 p2_props = setNames(

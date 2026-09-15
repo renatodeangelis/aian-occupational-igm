@@ -23,11 +23,11 @@ aian_full = readRDS("data/aian_full.rds")
 
 p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
                                df_linked = data, df_full = aian_full,
-                               R = 500, .seed = 123)
+                               R = 2000, .seed = 123)
 
 p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son,
                                df_linked = data, df_full = aian_full,
-                               R = 500, .seed = 123)
+                               R = 2000, .seed = 123)
 
 ################################################################################
 # GLOBAL POINT ESTIMATES
@@ -49,6 +49,12 @@ cat("Global macro pi*:\n");     print(round(steady_macro, 3))
 cat("Global macro P:\n");       print(round(P_macro,      3))
 cat("\nGlobal meso pi_0:\n");   print(round(pi0_meso,     3))
 cat("Global meso pi*:\n");      print(round(steady_meso,  3))
+
+# Pairwise TV distances — full matrix at macro; sanity-check max == exp(dobrushin$d1)
+rd_macro = row_dists(P_macro)
+cat("\nGlobal macro pairwise TV distances:\n")
+print(round(rd_macro, 3))
+stopifnot(abs(max(rd_macro) - exp(dobrushin(P_macro)$d1)) < 1e-10)
 
 ################################################################################
 # GLOBAL MOBILITY SCALARS
@@ -108,26 +114,36 @@ compute_regional = function(df_reg) {
   eig_mods = sort(Mod(eigen(P, only.values = TRUE)$values), decreasing = TRUE)
   lambda2  = eig_mods[2]
 
-  relief = weighted.mean(df_reg$empstatd_1940 == 11, df_reg$w_atc_norm,
-                         na.rm = TRUE)
+  relief_lower = weighted.mean(df_reg$empstatd_1940 == 11,   df_reg$w_atc_norm, na.rm = TRUE)
+  relief_upper = weighted.mean(df_reg$classwkrd_1940 == 24,  df_reg$w_atc_norm, na.rm = TRUE)
+
+  # Farmworker share among sons in the farming macro destination (weighted)
+  farm_sons = dplyr::filter(df_reg, macro_son == "farming")
+  farmwkr_share = if (nrow(farm_sons) > 0)
+    weighted.mean(farm_sons$meso_son == "farmworker", farm_sons$w_atc_norm, na.rm = TRUE)
+  else NA_real_
 
   cell   = function(r, c) if (r %in% rownames(P) && c %in% colnames(P)) P[r, c] else NA_real_
   pisel  = function(k)    if (k %in% names(pis)) pis[k] else NA_real_
 
   list(
-    P          = P,
-    pi0        = pi0,
-    pistar     = pis,
-    n          = nrow(df_reg),
-    lambda2    = lambda2,
-    om1        = om(P, pi0, t = 0),
-    sm1        = sm(P, pi0, t = 0),
-    farm_ret   = cell("farming", "farming"),
-    pi_farming = pisel("farming"),
-    pi_manual  = pisel("manual"),
-    pi_nonman  = pisel("nonmanual"),
-    pi_nonemp  = pisel("nonemp"),
-    relief     = relief
+    P             = P,
+    pi0           = pi0,
+    pistar        = pis,
+    n             = nrow(df_reg),
+    lambda2       = lambda2,
+    d1            = dobrushin(P)$d1,
+    om1           = om(P, pi0, t = 0),
+    sm1           = sm(P, pi0, t = 0),
+    farm_ret      = cell("farming", "farming"),
+    pi0_farming   = if ("farming" %in% names(pi0)) pi0["farming"] else NA_real_,
+    farmwkr_share = farmwkr_share,
+    relief_lower  = relief_lower,
+    relief_upper  = relief_upper,
+    pi_farming    = pisel("farming"),
+    pi_manual     = pisel("manual"),
+    pi_nonman     = pisel("nonmanual"),
+    pi_nonemp     = pisel("nonemp")
   )
 }
 
@@ -140,22 +156,50 @@ regional_results = setNames(
 
 for (r in regions_list) {
   res = regional_results[[r]]
-  cat(sprintf("  %s  n=%d  farm_ret=%.3f  pi*_farm=%.3f  lambda2=%.3f  relief=%.3f\n",
+  cat(sprintf("  %s  n=%d  farm_ret=%.3f  pi0_farm=%.3f  d1=%.3f  relief_lo=%.3f  relief_hi=%.3f\n",
               region_display[r], res$n, res$farm_ret,
-              res$pi_farming, res$lambda2, res$relief))
+              res$pi0_farming, res$d1, res$relief_lower, res$relief_upper))
 }
+
+################################################################################
+# REGIONAL COUNTERFACTUALS (regime_k, comp_k)
+# South excluded: OCC1950 100 conflates owner and tenant farmers; tenancy
+# dominated in the South, making the "farmer" state non-comparable.
+################################################################################
+
+reg_cf = regional_counterfactuals(regional_data, data,
+                                   macro_pop, macro_son,
+                                   exclude = "south")
+
+cat("\n--- Regional counterfactuals (region vs national chain) ---\n")
+print(reg_cf)
+
+################################################################################
+# REGIONAL BOOTSTRAP (regime_k, comp_k)
+# Fixed-weight bootstrap; national P held at point estimate.
+################################################################################
+
+reg_cf_boot = boot_regional_cf(regional_data, P_macro, pi0_macro,
+                                macro_pop, macro_son,
+                                exclude = "south",
+                                R = 2000, .seed = 456)
+
+cat("\n--- Regional counterfactual bootstrap intervals ---\n")
+print(reg_cf_boot)
 
 ################################################################################
 # SAVE
 ################################################################################
 
 estimates = list(
-  # Global bootstrap tibbles
+  # Global bootstrap (list: P, pi_s, d1)
   p_mat_macro   = p_mat_macro,
   p_mat_meso    = p_mat_meso,
   # Global point-estimate matrices
   P_macro       = P_macro,
   P_meso        = P_meso,
+  # Pairwise TV distances
+  rd_macro      = rd_macro,
   # Distributions
   pi0_macro     = pi0_macro,
   pi0_meso      = pi0_meso,
@@ -171,9 +215,11 @@ estimates = list(
   om_meso       = om_meso,
   sm_meso       = sm_meso,
   em_meso       = em_meso,
-  # Regional (named list)
-  regional      = regional_results,
-  regions_list  = regions_list,
+  # Regional (named list) and counterfactuals
+  regional       = regional_results,
+  reg_cf         = reg_cf,
+  reg_cf_boot    = reg_cf_boot,
+  regions_list   = regions_list,
   region_display = region_display
 )
 

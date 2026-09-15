@@ -20,6 +20,8 @@ source("code/00_utils.R")
 est = readRDS("output/estimates.rds")
 
 regional_results = est$regional
+reg_cf           = est$reg_cf
+reg_cf_boot      = est$reg_cf_boot
 regions_list     = est$regions_list
 region_display   = est$region_display
 P_meso           = est$P_meso
@@ -33,23 +35,35 @@ steady_meso      = est$steady_meso
 # booktabs + colortbl.
 ################################################################################
 
-tbl = do.call(rbind, lapply(regions_list, function(r) {
-  g = regional_results[[r]]
+# South is excluded from regional comparison (OCC1950 100 conflates owner and
+# tenant farmers; tenancy dominated in the South).
+regions_cf = setdiff(regions_list, "south")
+
+tbl = do.call(rbind, lapply(regions_cf, function(r) {
+  g  = regional_results[[r]]
+  cf = reg_cf[reg_cf$region == r, ]
+  cb = reg_cf_boot[reg_cf_boot$region == r, ]
   data.frame(
-    region     = r,
-    display    = region_display[r],
-    farm_ret   = g$farm_ret,
-    pi_farming = g$pi_farming,
-    pi_manual  = g$pi_manual,
-    pi_nonman  = g$pi_nonman,
-    lambda2    = g$lambda2,
-    relief     = g$relief,
-    n          = g$n,
+    region        = r,
+    display       = region_display[r],
+    n             = g$n,
+    pi0_farming   = g$pi0_farming,
+    farm_ret      = g$farm_ret,
+    farmwkr_share = g$farmwkr_share,
+    relief_lower  = g$relief_lower,
+    relief_upper  = g$relief_upper,
+    d1            = g$d1,
+    regime        = cf$regime,
+    regime_lo     = cb$regime_lo,
+    regime_hi     = cb$regime_hi,
+    comp          = cf$comp,
+    comp_lo       = cb$comp_lo,
+    comp_hi       = cb$comp_hi,
     stringsAsFactors = FALSE
   )
 }))
 
-tbl = tbl[order(-tbl$pi_farming), ]
+tbl = tbl[order(-tbl$pi0_farming), ]
 
 # Shade integer [2, 22] — column range rescaled linearly
 shade_int = function(x) {
@@ -58,9 +72,11 @@ shade_int = function(x) {
   as.integer(round(2 + (x - rng[1]) / diff(rng) * 20))
 }
 
-sh_farm   = shade_int(tbl$pi_farming)
-sh_manual = shade_int(tbl$pi_manual)
-sh_relief = shade_int(tbl$relief)
+sh_pi0    = shade_int(tbl$pi0_farming)
+sh_rel_lo = shade_int(tbl$relief_lower)
+sh_rel_hi = shade_int(tbl$relief_upper)
+sh_regime = shade_int(tbl$regime)
+sh_comp   = shade_int(tbl$comp)
 
 # Strip leading zero
 fmt = function(x) sub("^0", "", sprintf("%.3f", x))
@@ -74,34 +90,42 @@ cell = function(val, bold = FALSE) {
   if (bold) sprintf("\\textbf{%s}", fmt(val)) else fmt(val)
 }
 
+# Interval cell: "est [lo, hi]" in footnotesize
+cell_ci = function(est, lo, hi, shade = NULL) {
+  ci_str = sprintf("\\footnotesize[%s,\\,%s]", fmt(lo), fmt(hi))
+  v = sprintf("%s %s", fmt(est), ci_str)
+  if (!is.null(shade)) sprintf("\\sh{%d}{%s}", shade, v) else v
+}
+
 ln = character(0)
-ln = c(ln, "\\begin{tabular}{lrrrrrr}")
+ln = c(ln, "\\begin{tabular}{lrrrrrrrrr}")
 ln = c(ln, "\\toprule")
 ln = c(ln, paste(
-  "Region",
+  "Region", "$n$",
+  "$\\pi_0^{\\text{farm}}$",
   "Farm ret.",
-  "$\\pi^*_{\\text{farming}}$",
-  "$\\pi^*_{\\text{manual}}$",
-  "$\\pi^*_{\\text{nonmanual}}$",
-  "$\\lambda_2$",
-  "Relief",
+  "Farmwkr.",
+  "Relief$^-$",
+  "Relief$^+$",
+  "$\\delta(P)$",
+  "regime$_k$",
+  "comp$_k$",
   sep = " & "
 ), "\\\\")
 ln = c(ln, "\\midrule")
 
 for (i in seq_len(nrow(tbl))) {
-  r        = tbl$region[i]
-  is_ok    = (r == "ok")
-  is_south = (r == "south")
-
   row_str = paste(
     tbl$display[i],
+    format(tbl$n[i], big.mark = ",", trim = TRUE),
+    cell_sh(sh_pi0[i],    tbl$pi0_farming[i]),
     cell(tbl$farm_ret[i]),
-    cell_sh(sh_farm[i],   tbl$pi_farming[i]),
-    cell_sh(sh_manual[i], tbl$pi_manual[i]),
-    cell(tbl$pi_nonman[i], bold = is_ok),
-    cell(tbl$lambda2[i],   bold = is_south),
-    cell_sh(sh_relief[i], tbl$relief[i]),
+    cell(tbl$farmwkr_share[i]),
+    cell_sh(sh_rel_lo[i], tbl$relief_lower[i]),
+    cell_sh(sh_rel_hi[i], tbl$relief_upper[i]),
+    cell(tbl$d1[i]),
+    cell_ci(tbl$regime[i], tbl$regime_lo[i], tbl$regime_hi[i], sh_regime[i]),
+    cell_ci(tbl$comp[i],   tbl$comp_lo[i],   tbl$comp_hi[i],   sh_comp[i]),
     sep = " & "
   )
   ln = c(ln, paste0(row_str, " \\\\"))
@@ -114,6 +138,8 @@ tbl_by_n  = tbl[order(-tbl$n), ]
 n_entries = sprintf("%s: %s",
                     tbl_by_n$display,
                     format(tbl_by_n$n, big.mark = ",", trim = TRUE))
+ln = c(ln, "")
+ln = c(ln, "% South excluded: OCC1950 100 conflates owner and tenant farmers.")
 ln = c(ln, "")
 ln = c(ln, sprintf("{\\footnotesize %s}", paste(n_entries, collapse = ";\\enspace ")))
 
