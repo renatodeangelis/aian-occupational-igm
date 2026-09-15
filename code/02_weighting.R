@@ -12,7 +12,7 @@ aian_merged = readRDS("data/aian_merged.rds") |>
 aian_full = read_csv(
   file = "https://www.dropbox.com/scl/fi/ouj5rods7i1a0jomyk7ec/usa_00027.csv?rlkey=az0lfp12oqk82b9p1uf5nk309&st=lxmzjue2&dl=1") |>
   janitor::clean_names() |>
-  filter(age >= 20 & age < 49,
+  filter(age >= 20 & age < 50,
          school == 1) |>
   mutate(birthyr_son = 1940 - age,
          region = assign_region(statefip),
@@ -21,13 +21,7 @@ aian_full = read_csv(
 
 # --- Point estimate weights via compute_weights() ---
 weights_out = compute_weights(aian_merged, aian_full)
-aian_ps     = weights_out$data |>
-  filter(!is.na(w_atc)) |>
-  mutate(w_atc_norm = w_atc * n() / sum(w_atc))
-
-n_dropped = nrow(weights_out$data) - nrow(aian_ps)
-if (n_dropped > 0)
-  warning(sprintf("%d linked obs dropped: NA p_hat (missing region or education)", n_dropped))
+aian_ps     = weights_out$data
 
 # --- Common support diagnostics (reuses p_hat from compute_weights) ---
 aian_comb = bind_rows(
@@ -65,7 +59,7 @@ ess_global = sum(aian_ps$w_atc_norm)^2 / sum(aian_ps$w_atc_norm^2)
 cat("Effective sample size:", round(ess_global, 1),
     "of", nrow(aian_ps), "observations\n")
 
-trim_threshold = quantile(aian_ps$w_atc, 0.99, na.rm = TRUE)
+trim_threshold = quantile(aian_ps$w_atc, 0.99)
 cat("99th percentile trim threshold:", round(trim_threshold, 3), "\n")
 cat("Observations trimmed:", sum(aian_ps$w_atc > trim_threshold), "\n")
 
