@@ -6,8 +6,8 @@ library(janitor)
 source("code/00_utils.R")
 
 aian = 3
-pop_years = c(1910, 1920, 1930, 1940)
-son_years = c(1910, 1920, 1930, 1940, 1950)
+pop_years = c(1900, 1910, 1920, 1930, 1940)
+son_years = c(1900, 1910, 1920, 1930, 1940, 1950)
 
 son_multiyear = c("lit", "gq", "gqtype", "school", "relate", "age",
                   "statefip", "speakeng", "occ1950")
@@ -22,7 +22,7 @@ pop_multiyear = c("histid", "hik", "age", "birthyr", "occ1950", "ind1950",
                   "marst", "bpl", "educd", "statefip", "countyicp", "urban",
                   "wkswork1", "durunemp", "incwage", "classwkrd")
 
-path = "https://www.dropbox.com/scl/fi/q4725zk5qw3ltruiucwgc/usa_00026.csv?rlkey=vzauffbwyj61upzhb4fezbq5c&st=y9467v1h&dl=1"
+path = "https://www.dropbox.com/scl/fi/3x5hlb10sza5gyoqk1l0k/usa_00028.csv?rlkey=id665yubz25czcttpzrp7f5qv&st=p477m379&dl=1"
 
 raw = read_csv(path, col_types = cols(.default = col_character())) |>
   clean_names() |>
@@ -31,7 +31,7 @@ raw = read_csv(path, col_types = cols(.default = col_character())) |>
                               .default = col_guess()))
 
 sons = raw |>
-  filter(year == 1940, sex == 1, between(age, 20, 44), race == aian,
+  filter(year == 1940, sex == 1, between(age, 20, 49), race == aian,
          !is.na(hik), hik != "") |>
   transmute(son_hik = hik, histid_1940 = histid)
 
@@ -124,7 +124,8 @@ cat("Unique fathers:", n_distinct(aian_clean$pid), "\n")
 
 aian_age = aian_clean |>
   select(pid, starts_with("age_pop")) |>
-  mutate(birthyr_1910 = 1910 - age_pop_1910,
+  mutate(birthyr_1900 = 1900 - age_pop_1900,
+         birthyr_1910 = 1910 - age_pop_1910,
          birthyr_1920 = 1920 - age_pop_1920,
          birthyr_1930 = 1930 - age_pop_1930,
          birthyr_1940 = 1940 - age_pop_1940) |>
