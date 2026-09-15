@@ -12,7 +12,7 @@ aian_merged = readRDS("data/aian_merged.rds") |>
 aian_full = read_csv(
   file = "https://www.dropbox.com/scl/fi/ouj5rods7i1a0jomyk7ec/usa_00027.csv?rlkey=az0lfp12oqk82b9p1uf5nk309&st=lxmzjue2&dl=1") |>
   janitor::clean_names() |>
-  filter(age >= 20 & age < 45,
+  filter(age >= 20 & age < 50,
          school == 1) |>
   mutate(birthyr_son = 1940 - age,
          region = assign_region(statefip),
@@ -30,8 +30,8 @@ aian_comb = bind_rows(
 ) |>
   mutate(
     cohort    = cut(birthyr_son,
-                    breaks = c(1895, 1900, 1905, 1910, 1915, 1921),
-                    labels = c("1896-1900", "1901-1905", "1906-1910",
+                    breaks = c(1890, 1895, 1900, 1905, 1910, 1915, 1921),
+                    labels = c("1891-1895", "1896-1900", "1901-1905", "1906-1910",
                                "1911-1915", "1916-1920")),
     region    = as.factor(region),
     education = as.factor(education))
