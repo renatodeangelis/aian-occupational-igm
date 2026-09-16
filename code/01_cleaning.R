@@ -35,7 +35,7 @@ sons = raw |>
          !is.na(hik), hik != "") |>
   transmute(son_hik = hik, histid_1940 = histid)
 
-cat("Sons (AIAN m 20-44, 1940, linked):", nrow(sons), "\n")
+cat("Sons (AIAN m 20-49, 1940, linked):", nrow(sons), "\n")
 
 son_records = raw |> semi_join(sons, by = c("hik" = "son_hik")) |>
   rename(son_hik = hik)

@@ -109,8 +109,19 @@ for (reg in regions) {
   w_out = compute_weights(linked_r, full_r, ps_formula = regional_formula)
   regional_weighted[[reg]] = w_out$data
 
-  ess = with(regional_weighted[[reg]], sum(w_atc_norm)^2 / sum(w_atc_norm^2))
-  cat(reg, "— ESS:", round(ess, 1), "of", nrow(regional_weighted[[reg]]), "\n")
+  ps_linked   = w_out$data$p_hat
+  ps_unlinked = w_out$p_hat_full
+  cs_lo       = max(min(ps_linked), min(ps_unlinked))
+  cs_hi       = min(max(ps_linked), max(ps_unlinked))
+  n_outside   = sum(ps_linked < cs_lo | ps_linked > cs_hi)
+  max_w       = max(w_out$data$w_atc_norm)
+  ess         = sum(w_out$data$w_atc_norm)^2 / sum(w_out$data$w_atc_norm^2)
+
+  cat(sprintf(
+    "%s  n=%d  ESS=%.1f  CS=[%.3f, %.3f]  outside_CS=%d  max_w=%.2f%s\n",
+    reg, nrow(w_out$data), ess, cs_lo, cs_hi, n_outside, max_w,
+    if (n_outside > 0) "  [WARNING: obs outside CS]" else ""
+  ))
 }
 
 saveRDS(regional_weighted, "data/aian_regional_weighted.rds")

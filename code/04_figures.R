@@ -42,11 +42,11 @@ dir.create("output/presentation", recursive = TRUE, showWarnings = FALSE)
 # FIGURE 1: MACRO TRANSITION MATRIX (pi_0 | P | pi*)
 ################################################################################
 
-g_pmac = plot_pmat(p_mat_macro, macro_pop, macro_son,
+g_pmac = plot_pmat(p_mat_macro$P, macro_pop, macro_son,
                    levels = macro_order,
                    title_expr = expression(italic(P))) +
   geom_tile(
-    data = filter(p_mat_macro, macro_pop %in% c(dob_mac$row1, dob_mac$row2)),
+    data = filter(p_mat_macro$P, macro_pop %in% c(dob_mac$row1, dob_mac$row2)),
     aes(x = macro_son, y = macro_pop),
     fill = NA, color = "black", linewidth = 0.4,
     inherit.aes = FALSE
@@ -68,11 +68,11 @@ message("Wrote fig1_macro_matrix")
 # FIGURE 2: MESO TRANSITION MATRIX (pi_0 | P | pi*)
 ################################################################################
 
-g_pmes = plot_pmat(p_mat_meso, meso_pop, meso_son,
+g_pmes = plot_pmat(p_mat_meso$P, meso_pop, meso_son,
                    levels = meso_order, text_size = 4.5,
                    title_expr = expression(italic(P))) +
   geom_tile(
-    data = filter(p_mat_meso, meso_pop %in% c(dob_mes$row1, dob_mes$row2)),
+    data = filter(p_mat_meso$P, meso_pop %in% c(dob_mes$row1, dob_mes$row2)),
     aes(x = meso_son, y = meso_pop),
     fill = NA, color = "black", linewidth = 0.4,
     inherit.aes = FALSE

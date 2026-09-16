@@ -108,15 +108,26 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
 
 assign_region = function(statefip) {
   case_when(
-    statefip == 6 ~ "cali",
-    statefip %in% c(27, 55, 17, 18, 26, 39, 9, 10, 23, 24, 25, 33, 34, 36, 42, 44, 50, 11) ~ "north",
-    statefip %in% c(8, 16, 32, 49, 56, 41, 53)  ~ "nw",
-    statefip == 40 ~ "ok",
-    statefip %in% c(19, 20, 29, 31, 30, 38, 46) ~ "plains",
-    statefip %in% c(1, 5, 12, 13, 21, 22, 28, 37, 45, 47, 48, 51, 54) ~ "south",
-    statefip %in% c(4, 35) ~ "sw",
+    statefip %in% c(4, 35)         ~ "sw",
+    statefip %in% c(30, 38, 46)    ~ "nplains",
+    statefip %in% c(27, 55)        ~ "glakes",
+    statefip %in% c(41, 53)        ~ "nw",
+    statefip == 40                 ~ "ok",
+    statefip == 6                  ~ "cali",
+    statefip == 37                 ~ "nc",
+    statefip %in% c(8, 16, 32, 49, 56)                        ~ "basin",
+    statefip %in% c(19, 20, 29, 31)                           ~ "prairie",
+    statefip %in% c(17, 18, 39, 26)                           ~ "midwest",
+    statefip %in% c(9, 10, 11, 23, 24, 25, 33, 34, 36, 42, 44, 50) ~ "northeast",
+    statefip %in% c(1, 5, 12, 13, 21, 22, 28, 45, 47, 48, 51, 54)  ~ "south",
     TRUE ~ NA_character_)
 }
+
+# Regions large enough to estimate: n >= 800 and ESS >= 500 (fixed ex ante).
+compare_regions = c("sw", "nplains", "ok", "glakes", "nw", "cali", "nc", "basin")
+
+# Regions excluded from both comparison and benchmark on size grounds.
+small_regions   = c("midwest", "prairie", "northeast", "south")
 
 # --- Education classification ---
 
@@ -185,6 +196,25 @@ trim_weights_top1 = function(df) {
 # Renormalise w_atc_norm within df so weights average to 1.
 renorm = function(df) {
   dplyr::mutate(df, w_atc_norm = w_atc_norm / sum(w_atc_norm) * dplyr::n())
+}
+
+# Pool a set of regional weighted frames into a single benchmark frame.
+# pop_n: optional named vector of target-population counts by region
+#        (e.g. table(aian_full$region)). If supplied, each region's weights are
+#        rescaled to sum to its target count before pooling (option a: target-
+#        population scaling). If NULL, regions enter in proportion to their
+#        linked n (option b: linked-sample scaling).
+pool_regions = function(regional_data, regions, pop_n = NULL) {
+  stopifnot(all(regions %in% names(regional_data)))
+  parts = lapply(regions, function(r) {
+    d = renorm(regional_data[[r]])
+    if (!is.null(pop_n)) {
+      stopifnot(r %in% names(pop_n))
+      d$w_atc_norm = d$w_atc_norm * (pop_n[[r]] / sum(d$w_atc_norm))
+    }
+    d
+  })
+  renorm(dplyr::bind_rows(parts))
 }
 
 # Load the global weighted dataset and set macro_levels / meso_levels in the
@@ -541,80 +571,99 @@ boot_pmatrix_ci = function(
   )
 }
 
-# --- Bootstrap for regional counterfactuals (regime_k, comp_k) ---
+# --- Bootstrap for regional counterfactuals — LOO benchmark rebuilt per draw ---
 #
-# Fixed-weight bootstrap: resamples rows (clustered on pid) within each region
-# and renormalises existing weights. Does NOT refit the PS model — national P
-# and pi0 are held fixed at their point estimates.
+# Resamples region k AND each benchmark region (clustered on pid throughout).
+# Cluster indices precomputed once per region to avoid O(N) inner lookups.
+# n_na: draws dropped because a benchmark state was absent from k's resample.
 #
-# Return value: tibble with columns
-#   region, n, regime, regime_lo, regime_hi, comp, comp_lo, comp_hi, total
+# Cost warning: 8 regions × R draws, each rebuilding a ~16,000-row benchmark.
+# Run R = 200 first to time; R = 1000 is acceptable if 2000 is impractical.
 
 boot_regional_cf = function(
-    regional_data, P_nat, pi0_nat,
+    regional_data,
     level_dad, level_son,
-    exclude  = NULL,
+    compare  = compare_regions,
+    pop_n    = NULL,
     R        = 2000,
     .seed    = NULL,
     mc.cores = 1L,
     pid_col  = "pid",
     alpha    = 0.05) {
 
-  if (!is.null(exclude))
-    regional_data = regional_data[!names(regional_data) %in% exclude]
-
   dad_sym = rlang::ensym(level_dad)
   son_sym = rlang::ensym(level_son)
-
   if (!is.null(.seed)) set.seed(.seed)
 
-  purrr::imap_dfr(regional_data, function(d, reg) {
-    d = renorm(d)
+  # Precompute cluster indices once per region — O(N) amortised across all draws
+  idx_by_region = lapply(regional_data[compare], function(d)
+    split(seq_len(nrow(d)), d[[pid_col]]))
 
-    P_k   = p_matrix(d, !!dad_sym, !!son_sym)
-    pi0_k = pi_0(d, !!dad_sym)
-    P_k   = P_k[rownames(P_nat), colnames(P_nat), drop = FALSE]
-    stopifnot(identical(dim(P_k), dim(P_nat)))
-
-    regime_hat = sdm1(pi0_k, P_k,   pi0_k,   P_nat)
-    comp_hat   = sdm1(pi0_k, P_nat, pi0_nat, P_nat)
-    total_hat  = sdm1(pi0_k, P_k,   pi0_nat, P_nat)
-
-    pid_idx = split(seq_len(nrow(d)), d[[pid_col]])
+  resample_region = function(r) {
+    pid_idx = idx_by_region[[r]]
     fams    = names(pid_idx)
+    fam_b   = sample(fams, length(fams), replace = TRUE)
+    idx     = unlist(pid_idx[fam_b], use.names = FALSE)
+    renorm(regional_data[[r]][idx, ])
+  }
+
+  purrr::map_dfr(compare, function(k) {
+    bench = setdiff(compare, k)
+    d_k   = renorm(regional_data[[k]])
+    d_b   = pool_regions(regional_data, bench, pop_n)
+
+    P_b0   = p_matrix(d_b, !!dad_sym, !!son_sym)
+    pi0_b0 = pi_0(d_b, !!dad_sym)
+    P_k0   = p_matrix(d_k, !!dad_sym, !!son_sym)
+    pi0_k0 = pi_0(d_k, !!dad_sym)
+    stopifnot(all(rownames(P_b0) %in% rownames(P_k0)))
+    P_k0 = P_k0[rownames(P_b0), colnames(P_b0), drop = FALSE]
+
+    regime_hat = sdm1(pi0_k0, P_k0, pi0_k0, P_b0)
+    comp_hat   = sdm1(pi0_k0, P_b0, pi0_b0, P_b0)
+    total_hat  = sdm1(pi0_k0, P_k0, pi0_b0, P_b0)
 
     boot_once = function() {
-      fam_b = sample(fams, length(fams), replace = TRUE)
-      idx   = unlist(pid_idx[fam_b], use.names = FALSE)
-      d_b   = renorm(d[idx, ])
-      P_b   = p_matrix(d_b, !!dad_sym, !!son_sym)
-      if (!all(rownames(P_nat) %in% rownames(P_b)))
-        return(c(regime = NA_real_, comp = NA_real_))
-      P_b   = P_b[rownames(P_nat), colnames(P_nat), drop = FALSE]
-      pi0_b = pi_0(d_b, !!dad_sym)
-      c(regime = sdm1(pi0_b, P_b,   pi0_b,   P_nat),
-        comp   = sdm1(pi0_b, P_nat, pi0_nat, P_nat))
+      dk = resample_region(k)
+      bparts = lapply(bench, function(r) {
+        d = resample_region(r)
+        if (!is.null(pop_n)) d$w_atc_norm = d$w_atc_norm * (pop_n[[r]] / sum(d$w_atc_norm))
+        d
+      })
+      db = renorm(dplyr::bind_rows(bparts))
+
+      Pb = p_matrix(db, !!dad_sym, !!son_sym)
+      Pk = p_matrix(dk, !!dad_sym, !!son_sym)
+      if (!all(rownames(Pb) %in% rownames(Pk)))
+        return(c(regime = NA_real_, comp = NA_real_, total = NA_real_))
+      Pk   = Pk[rownames(Pb), colnames(Pb), drop = FALSE]
+      pk   = pi_0(dk, !!dad_sym)
+      pb   = pi_0(db, !!dad_sym)
+      c(regime = sdm1(pk, Pk, pk, Pb),
+        comp   = sdm1(pk, Pb, pb, Pb),
+        total  = sdm1(pk, Pk, pb, Pb))
     }
 
-    boots = if (mc.cores > 1L) {
+    boots = if (mc.cores > 1L)
       parallel::mclapply(seq_len(R), function(i) boot_once(), mc.cores = mc.cores)
-    } else {
+    else
       lapply(seq_len(R), function(i) boot_once())
-    }
 
     arr  = do.call(rbind, boots)
     lo_p = alpha / 2; hi_p = 1 - alpha / 2
+    q    = function(col, p) unname(quantile(arr[, col], p, na.rm = TRUE))
 
     tibble::tibble(
-      region    = reg,
-      n         = nrow(d),
+      region    = k,
+      n         = nrow(d_k),
+      n_bench   = nrow(d_b),
+      n_na      = sum(is.na(arr[, "regime"])),
       regime    = regime_hat,
-      regime_lo = quantile(arr[, "regime"], lo_p, na.rm = TRUE),
-      regime_hi = quantile(arr[, "regime"], hi_p, na.rm = TRUE),
+      regime_lo = q("regime", lo_p), regime_hi = q("regime", hi_p),
       comp      = comp_hat,
-      comp_lo   = quantile(arr[, "comp"], lo_p, na.rm = TRUE),
-      comp_hi   = quantile(arr[, "comp"], hi_p, na.rm = TRUE),
-      total     = total_hat
+      comp_lo   = q("comp",   lo_p), comp_hi   = q("comp",   hi_p),
+      total     = total_hat,
+      total_lo  = q("total",  lo_p), total_hi  = q("total",  hi_p)
     )
   })
 }
@@ -707,44 +756,44 @@ sdm1 = function(pi0_a, P_a, pi0_b, P_b) {
   tv_norm(as.numeric(pi0_a %*% P_a), as.numeric(pi0_b %*% P_b))
 }
 
-# --- Regional counterfactuals (region-vs-national, macro only) ---
+# --- Regional counterfactuals — leave-one-out benchmark ---
 #
-# For each region k (South excluded by default via `exclude`):
-#   regime_k: given the fathers region k actually had, how differently did its
-#             own transition regime place their sons vs the national regime?
-#   comp_k:   how much of regional distinctiveness traces to having different
-#             fathers (composition), holding the regime at national?
-#   total_k:  SDM between the region's actual chain and the national chain.
+# Benchmark for region k = pool_regions() over all other compare regions.
+#   regime_k: given the fathers region k had, how differently did its own regime
+#             place sons vs the benchmark regime?
+#   comp_k:   how much traces to having different fathers, holding regime at benchmark?
+#   total_k:  SDM between region k's actual chain and the benchmark chain.
 #
-# These are two counterfactual comparisons, NOT additive decomposition
-# components (TV is a norm; regime + comp != total in general).
-#
-# Requires macro_levels / meso_levels in the calling frame (set by load_global).
+# NOT a decomposition: TV is a norm; regime + comp != total in general.
+# Benchmark states must be a subset of region k's states (stopifnot catches gaps).
 
-regional_counterfactuals = function(regional_data, data_nat,
+regional_counterfactuals = function(regional_data,
                                     level_dad, level_son,
-                                    exclude = NULL) {
+                                    compare = compare_regions,
+                                    pop_n   = NULL) {
   dad_sym = rlang::ensym(level_dad)
   son_sym = rlang::ensym(level_son)
 
-  P_nat   = p_matrix(data_nat, !!dad_sym, !!son_sym)
-  pi0_nat = pi_0(data_nat, !!dad_sym)
+  purrr::map_dfr(compare, function(k) {
+    d_k = renorm(regional_data[[k]])
+    d_b = pool_regions(regional_data, setdiff(compare, k), pop_n)
 
-  if (!is.null(exclude))
-    regional_data = regional_data[!names(regional_data) %in% exclude]
+    P_b   = p_matrix(d_b, !!dad_sym, !!son_sym)
+    pi0_b = pi_0(d_b, !!dad_sym)
+    P_k   = p_matrix(d_k, !!dad_sym, !!son_sym)
+    pi0_k = pi_0(d_k, !!dad_sym)
 
-  purrr::imap_dfr(regional_data, function(d, reg) {
-    d     = renorm(d)
-    P_k   = p_matrix(d, !!dad_sym, !!son_sym)
-    pi0_k = pi_0(d, !!dad_sym)
-    P_k   = P_k[rownames(P_nat), colnames(P_nat), drop = FALSE]
-    stopifnot(identical(dim(P_k), dim(P_nat)))
+    stopifnot(all(rownames(P_b) %in% rownames(P_k)))
+    P_k = P_k[rownames(P_b), colnames(P_b), drop = FALSE]
+    stopifnot(identical(dim(P_k), dim(P_b)))
+
     tibble::tibble(
-      region = reg,
-      n      = nrow(d),
-      regime = sdm1(pi0_k, P_k,   pi0_k,   P_nat),
-      comp   = sdm1(pi0_k, P_nat, pi0_nat, P_nat),
-      total  = sdm1(pi0_k, P_k,   pi0_nat, P_nat)
+      region  = k,
+      n       = nrow(d_k),
+      n_bench = nrow(d_b),
+      regime  = sdm1(pi0_k, P_k,   pi0_k,   P_b),
+      comp    = sdm1(pi0_k, P_b,   pi0_b,   P_b),
+      total   = sdm1(pi0_k, P_k,   pi0_b,   P_b)
     )
   })
 }
