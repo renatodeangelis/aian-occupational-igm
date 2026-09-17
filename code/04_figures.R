@@ -57,8 +57,6 @@ gst_mac = plot_pi(steady_macro, title_expr = expression(pi^"*"), levels = macro_
 
 fig_macro = g0_mac + g_pmac + gst_mac + plot_layout(widths = c(1, 6, 1))
 
-ggsave("output/presentation/fig1_macro_matrix.pdf", fig_macro,
-       width = 10, height = 7, dpi = 300)
 ggsave("output/presentation/fig1_macro_matrix.png", fig_macro,
        width = 10, height = 7, dpi = 300)
 
@@ -83,114 +81,7 @@ gst_mes = plot_pi(steady_meso, title_expr = expression(pi^"*"), levels = meso_or
 
 fig_meso = g0_mes + g_pmes + gst_mes + plot_layout(widths = c(1, 6, 1))
 
-ggsave("output/presentation/fig2_meso_matrix.pdf", fig_meso,
-       width = 12, height = 8, dpi = 300)
 ggsave("output/presentation/fig2_meso_matrix.png", fig_meso,
        width = 12, height = 8, dpi = 300)
 
 message("Wrote fig2_meso_matrix")
-
-################################################################################
-# FIGURE 3: REGION REFERENCE MAP
-# Categorical fills; n per region as two-line label.
-# maps::map() IDs include ":suffix" variants (e.g. "michigan:north") — strip
-# before joining to state_fips_1940.
-################################################################################
-
-region_order = c("sw", "south", "cali", "ok", "plains", "nw", "north")
-
-region_labels = c(
-  sw     = "Southwest",
-  south  = "South",
-  cali   = "California",
-  ok     = "Oklahoma",
-  plains = "Plains",
-  nw     = "Northwest",
-  north  = "North"
-)
-
-# Count n per region from the global weighted data
-data_global = readRDS("data/aian_weighted.rds")
-
-region_n = data_global |>
-  count(region, name = "n") |>
-  filter(!is.na(region)) |>
-  mutate(
-    region      = factor(region, levels = region_order),
-    region_name = region_labels[as.character(region)],
-    map_label   = sprintf("%s\nn = %s", region_name, format(n, big.mark = ","))
-  ) |>
-  arrange(region)
-
-sf::sf_use_s2(FALSE)
-
-states_sf = sf::st_as_sf(maps::map("state", plot = FALSE, fill = TRUE)) |>
-  mutate(state_name = sub(":.*$", "", ID)) |>
-  left_join(state_fips_1940, by = "state_name") |>
-  filter(!is.na(statefip)) |>
-  sf::st_make_valid()
-
-stopifnot(!any(is.na(states_sf$region)))
-
-# Albers Equal Area (5070) for polygon union; reproject to WGS84 (4326) for labels
-regions_sf = states_sf |>
-  sf::st_transform(5070) |>
-  group_by(region) |>
-  summarize(geometry = sf::st_union(geom), .groups = "drop") |>
-  sf::st_transform(4326) |>
-  mutate(region = factor(region, levels = region_order)) |>
-  left_join(region_n, by = "region")
-
-# Surface points in Albers (accurate), coordinates extracted in WGS84
-label_pts_base = regions_sf |>
-  sf::st_transform(5070) |>
-  sf::st_point_on_surface() |>
-  sf::st_transform(4326) |>
-  sf::st_coordinates() |>
-  as_tibble() |>
-  bind_cols(sf::st_drop_geometry(regions_sf)) |>
-  rename(x = X, y = Y)
-
-# ── LABEL NUDGES ── edit dx/dy here and re-run this block ──────────────────
-nudge_dx = c(cali = -0.5, ok = 0.0, north =  7.0,
-             nw   =  0.0, plains =  0.0, south =  2.5, sw = 0.0)
-nudge_dy = c(cali = -1.0, ok = 0.0, north = -3.0,
-             nw   = -2.0, plains = -2.5, south =  0.5, sw = 0.0)
-# ────────────────────────────────────────────────────────────────────────────
-
-nudge = tibble(
-  region = factor(names(nudge_dx), levels = region_order),
-  dx     = nudge_dx,
-  dy     = nudge_dy
-)
-
-label_pts = label_pts_base |>
-  left_join(nudge, by = "region") |>
-  mutate(xlab = x + dx, ylab = y + dy)
-
-region_fills = c(
-  sw     = "#EADBC8",
-  south  = "#DCE4D2",
-  cali   = "#D9DEE8",
-  ok     = "#EFE2DA",
-  plains = "#E3E0D5",
-  nw     = "#D6E0DE",
-  north  = "#E6DCE4"
-)
-
-region_map = ggplot() +
-  geom_sf(data = regions_sf, aes(fill = region),
-          color = "grey35", linewidth = 0.25) +
-  geom_text(data = label_pts,
-            aes(x = xlab, y = ylab, label = map_label),
-            size = 3.5, lineheight = 0.95, color = "grey15",
-            fontface = "bold") +
-  scale_fill_manual(values = region_fills, guide = "none") +
-  coord_sf(crs = sf::st_crs(4326), datum = NA, expand = TRUE) +
-  theme_void() +
-  theme(plot.margin = margin(2, 2, 2, 2))
-
-ggsave("output/presentation/region_map_check.png", region_map,
-       width = 6.8, height = 4.4, units = "in", dpi = 200)
-
-message("Done. Figures written to output/presentation/")
