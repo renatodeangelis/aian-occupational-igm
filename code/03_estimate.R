@@ -10,6 +10,7 @@
 ################################################################################
 
 library(dplyr)
+library(tidyr)
 library(expm)
 
 source("code/00_utils.R")
@@ -21,13 +22,15 @@ aian_full = readRDS("data/aian_full.rds")
 # GLOBAL BOOTSTRAP TRANSITION MATRICES
 ################################################################################
 
-p_mat_macro = boot_pmatrix_ci(data, macro_pop, macro_son,
-                               df_linked = data, df_full = aian_full,
-                               R = 2000, .seed = 123)
+boot_pair = boot_pmatrix_ci_pair(
+  data,
+  macro_pop, macro_son,
+  meso_pop,  meso_son,
+  df_linked = data, df_full = aian_full,
+  R = 2000, .seed = 123)
 
-p_mat_meso  = boot_pmatrix_ci(data, meso_pop, meso_son,
-                               df_linked = data, df_full = aian_full,
-                               R = 2000, .seed = 123)
+p_mat_macro = boot_pair$macro
+p_mat_meso  = boot_pair$meso
 
 ################################################################################
 # GLOBAL POINT ESTIMATES
@@ -68,6 +71,10 @@ sm_meso  = sm(P_meso, pi0_meso, t = 0)
 
 cat(sprintf("\nGlobal macro  OM=%.3f  SM=%.3f\n", om_macro, sm_macro))
 cat(sprintf("Global meso   OM=%.3f  SM=%.3f\n",  om_meso,  sm_meso))
+em_macro = om_macro - sm_macro
+em_meso  = om_meso  - sm_meso
+cat(sprintf("Global macro  EM=%.3f\n", em_macro))
+cat(sprintf("Global meso   EM=%.3f\n",  em_meso))
 
 ################################################################################
 # DOBRUSHIN CONTRACTION
@@ -80,6 +87,21 @@ cat(sprintf(
   "\nDobrushin d1:  macro=%.4f [%s vs %s]   meso=%.4f [%s vs %s]\n",
   dob_mac$d1, dob_mac$row1, dob_mac$row2,
   dob_mes$d1, dob_mes$row1, dob_mes$row2))
+
+################################################################################
+# RELIEF CROSS-TAB (global)
+# Weighted destination × employment status for farm-origin sons.
+################################################################################
+
+relief_xtab_global = build_relief_xtab(data)
+cat("\n--- Global relief cross-tab (farm origin) ---\n")
+print(
+  tidyr::pivot_wider(relief_xtab_global,
+                     id_cols = c(macro_son, n_row),
+                     names_from = emp_cat,
+                     values_from = row_pct) |>
+    dplyr::mutate(dplyr::across(where(is.numeric), ~ round(.x, 3)))
+)
 
 ################################################################################
 # REGIONAL POINT ESTIMATES
@@ -97,6 +119,34 @@ region_display = c(
   nc      = "North Carolina",
   basin   = "Basin and Mountain"
 )
+
+emp_levels = c("at_work", "emergency", "unemployed", "other", "na")
+
+# Weighted cross-tab of sons' macro destination × 1940 employment status,
+# conditional on farm origin. NA employment status is an explicit column.
+# Row percentages are computed including the NA column in the denominator.
+build_relief_xtab = function(df, macro_levels_vec = macro_order) {
+  farm_origin = dplyr::filter(df, macro_pop == "farming") |>
+    dplyr::mutate(emp_cat = dplyr::case_when(
+      is.na(empstatd_1940) ~ "na",
+      empstatd_1940 == 10  ~ "at_work",
+      empstatd_1940 == 11  ~ "emergency",
+      empstatd_1940 == 21  ~ "unemployed",
+      TRUE                 ~ "other"
+    ))
+
+  farm_origin |>
+    dplyr::group_by(macro_son, emp_cat) |>
+    dplyr::summarise(n_unw = dplyr::n(), w = sum(w_atc_norm), .groups = "drop") |>
+    tidyr::complete(
+      macro_son = macro_levels_vec,
+      emp_cat   = emp_levels,
+      fill      = list(n_unw = 0L, w = 0)
+    ) |>
+    dplyr::group_by(macro_son) |>
+    dplyr::mutate(row_pct = w / sum(w), n_row = sum(n_unw)) |>
+    dplyr::ungroup()
+}
 
 compute_regional = function(df_reg) {
   df_reg = renorm(df_reg)
@@ -130,6 +180,7 @@ compute_regional = function(df_reg) {
     pi0               = pi0,
     pistar            = pis,
     n                 = nrow(df_reg),
+    ess               = sum(df_reg$w_atc_norm)^2 / sum(df_reg$w_atc_norm^2),
     lambda2           = lambda2,
     d1                = dob$d1,
     d1_row1           = dob$row1,
@@ -145,7 +196,8 @@ compute_regional = function(df_reg) {
     pi_farming        = pisel("farming"),
     pi_manual         = pisel("manual"),
     pi_nonman         = pisel("nonmanual"),
-    pi_nonemp         = pisel("nonemp")
+    pi_nonemp         = pisel("nonemp"),
+    relief_xtab       = build_relief_xtab(df_reg)
   )
 }
 
@@ -215,12 +267,19 @@ estimates = list(
   sm_macro      = sm_macro,
   om_meso       = om_meso,
   sm_meso       = sm_meso,
+  em_macro      = em_macro,
+  em_meso       = em_meso,
   # Regional (named list) and LOO counterfactuals
   regional        = regional_results,
   reg_cf          = reg_cf,
   reg_cf_boot     = reg_cf_boot,
   compare_regions = compare_regions,
-  region_display  = region_display
+  region_display  = region_display,
+  # Relief cross-tabs (farm origin → destination × employment status)
+  relief_xtab_global   = relief_xtab_global,
+  relief_xtab_regional = setNames(
+    lapply(compare_regions, function(r) regional_results[[r]]$relief_xtab),
+    compare_regions)
 )
 
 dir.create("output", showWarnings = FALSE, recursive = TRUE)

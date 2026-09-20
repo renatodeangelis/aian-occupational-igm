@@ -5,16 +5,13 @@
 # Dobrushin worst-row pair highlighted with black border.
 #
 # Reads:  output/estimates.rds
-# Writes: output/presentation/fig1_macro_matrix.{pdf,png}
-#         output/presentation/fig2_meso_matrix.{pdf,png}
-#         output/presentation/region_map_check.png
+# Writes: output/presentation/fig1_macro_matrix.png
+#         output/presentation/fig2_meso_matrix.png
 ################################################################################
 
 library(dplyr)
 library(ggplot2)
 library(patchwork)
-library(sf)
-library(maps)
 
 source("code/00_utils.R")
 
@@ -33,7 +30,7 @@ dob_mac      = est$dob_mac
 dob_mes      = est$dob_mes
 
 # Rebuild macro_levels / meso_levels for pi_0() if called from this script
-macro_levels = macro_compute_order
+macro_levels = macro_order
 meso_levels  = meso_order
 
 dir.create("output/presentation", recursive = TRUE, showWarnings = FALSE)

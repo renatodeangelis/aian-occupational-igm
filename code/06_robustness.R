@@ -1,5 +1,5 @@
 ################################################################################
-# 07_robustness.R
+# 06_robustness.R
 # Robustness checks against the main macro transition matrix estimates.
 #
 # §1  Cohort stationarity (birth cohorts 1896-1905, 1906-1915, 1916-1920)
@@ -30,12 +30,13 @@ cat("===========================================================================
 cat("§1 COHORT STATIONARITY\n")
 cat("================================================================================\n")
 
-cohort_labels = c("1896-1905", "1906-1915", "1916-1920")
+cohort_labels = c("1891-1895", "1896-1905", "1906-1915", "1916-1920")
 
 data_cohorts = data |>
   mutate(cohort_group = cut(birthyr_son,
-                            breaks = c(1895, 1905, 1915, 1921),
+                            breaks = c(1890, 1895, 1905, 1915, 1921),
                             labels = cohort_labels))
+stopifnot(!any(is.na(data_cohorts$cohort_group)))
 
 cohort_ns = data_cohorts |>
   count(cohort_group) |>
@@ -78,7 +79,7 @@ for (res in cohort_results) {
 ################################################################################
 
 cat("\n================================================================================\n")
-cat("§2 AGE WINDOW (25-44 vs 20-44)\n")
+cat("§2 AGE WINDOW (25-44 vs 20-49)\n")
 cat("================================================================================\n")
 
 data_2544 = data |>
@@ -95,7 +96,7 @@ pi0_main = pi_0(data,      macro_pop)
 pi0_2544 = pi_0(data_2544, macro_pop)
 
 robustness_tbl = tibble(
-  sample     = c("main (20-44)", "restricted (25-44)"),
+  sample     = c("main (20-49)", "restricted (25-44)"),
   n          = c(nrow(data), nrow(data_2544)),
   om_0       = round(c(om(P_main, pi0_main, t=0), om(P_2544, pi0_2544, t=0)), 3),
   sm_0       = round(c(sm(P_main, pi0_main, t=0), sm(P_2544, pi0_2544, t=0)), 3),

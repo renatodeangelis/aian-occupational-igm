@@ -15,6 +15,7 @@ classify_meso = function(occ) {
     occ %in% farmer_codes   ~ "farmer",
     occ %in% farmwork_codes ~ "farmworker",
     occ %in% nonman_codes   ~ "nonmanual",
+    # crafts_codes (762, 773, 781, 782) fall in 595:970; this branch fires first so they land in crafts, not unskilled.
     occ %in% 500:594 | occ %in% crafts_codes ~ "crafts",
     occ %in% 595:970 & !(occ %in% crafts_codes) & !(occ %in% farmwork_codes) ~ "unskilled",
     occ > 970 ~ "nonemp"
@@ -34,9 +35,6 @@ classify_macro = function(meso) {
 macro_order         = c("nonemp", "nonmanual", "manual", "farming")
 meso_order          = c("nonemp", "nonmanual", "crafts", "unskilled", "farmworker", "farmer")
 
-# Alphabetical order — matches p_matrix() output (which uses sort(union(...))).
-# Use when indexing P by name to avoid positional errors.
-macro_compute_order = c("nonemp", "nonmanual", "manual", "farming")
 
 # --- Modal occupation picker ---
 
@@ -57,6 +55,8 @@ pick_modal_meso = function(df, aian_age, prefer_employed = FALSE, empstatd_tiebr
       values_drop_na = TRUE) |>
     mutate(meso = classify_meso(occ)) |>
     group_by(pid, year) |>
+    # Groups by pid (father), not pid × son. Where brothers share a pid, birthyr_son
+    # is from the first brother (arbitrary); the picked year and meso apply to all siblings.
     summarise(
       birthyr_pop = first(birthyr_pop),
       birthyr_son = first(birthyr_son),
@@ -220,7 +220,7 @@ pool_regions = function(regional_data, regions, pop_n = NULL) {
 # Load the global weighted dataset and set macro_levels / meso_levels in the
 # calling frame so pi_0() can find them without a warning.
 load_global = function(path = "data/aian_weighted.rds") {
-  assign("macro_levels", macro_compute_order, envir = parent.frame())
+  assign("macro_levels", macro_order, envir = parent.frame())
   assign("meso_levels",  meso_order,          envir = parent.frame())
   readRDS(path)
 }
@@ -300,6 +300,7 @@ pi_0_unweighted = function(data, level) {
   return(pi0_vec)
 }
 
+# w_atc_norm must already be normalised in data (mean = 1). Call renorm() after subsetting.
 p_matrix = function(data, level_dad, level_son, matrix = TRUE) {
   dad_nm = rlang::as_string(rlang::ensym(level_dad))
   son_nm = rlang::as_string(rlang::ensym(level_son))
@@ -394,7 +395,11 @@ pi_star = function(p_mat) {
   eig = eigen(t(P))
   idx = which.min(abs(eig$values - 1))
   v = Re(eig$vectors[, idx])
-  if (any(v < 0)) v = abs(v)
+  if (all(v <= 0)) {
+    v = -v
+  } else if (any(v < 0)) {
+    stop("pi_star: eigenvector has mixed signs — P may not be ergodic")
+  }
   pi_s = v / sum(v)
   names(pi_s) = rownames(P)
   return(pi_s)
@@ -490,18 +495,21 @@ dprime_generator = function(P_t) {
   list(pairs = pairs_named, value = best)
 }
 
-# --- Bootstrap for global transition matrix, pi*, and delta(P) ---
+# --- Bootstrap for global transition matrices — macro and meso in a single loop ---
 #
-# Clusters on pid (family), re-runs compute_weights() on each draw so PS
-# uncertainty is propagated. Returns percentile intervals.
+# Runs compute_weights() once per draw, computes p_matrix() for both level pairs,
+# so 2000 draws costs 2000 speedglm fits instead of 4000.
+# tryCatch guards against rank-deficient resamples; dimension mismatches are also
+# dropped. Discarded draw count is reported; stop() if >5% are lost.
 #
-# Return value: list with
-#   $P    — tibble(dad, son, est, lo, hi)
-#   $pi_s — tibble(state, est, lo, hi)
-#   $d1   — named vector c(est, lo, hi)  [log scale, matches dobrushin()$d1]
+# Return value: list with $macro and $meso, each a list with
+#   $P  — tibble(dad, son, est, lo, hi)
+#   $d1 — named vector c(est, lo, hi)  [log scale, matches dobrushin()$d1]
 
-boot_pmatrix_ci = function(
-    data, level_dad, level_son,
+boot_pmatrix_ci_pair = function(
+    data,
+    level_dad1, level_son1,
+    level_dad2, level_son2,
     df_linked, df_full,
     R = 2000, .seed = NULL,
     mc.cores = 1L,
@@ -509,65 +517,84 @@ boot_pmatrix_ci = function(
     alpha = 0.05) {
 
   if (!is.null(.seed)) set.seed(.seed)
-  dad_sym = rlang::ensym(level_dad)
-  son_sym = rlang::ensym(level_son)
 
-  # Precompute cluster index once — O(N) lookup amortised across all draws
+  dad_nm1 = rlang::as_string(rlang::ensym(level_dad1))
+  son_nm1 = rlang::as_string(rlang::ensym(level_son1))
+  dad_nm2 = rlang::as_string(rlang::ensym(level_dad2))
+  son_nm2 = rlang::as_string(rlang::ensym(level_son2))
+
   pid_idx = split(seq_len(nrow(df_linked)), df_linked[[pid_col]])
   fams    = names(pid_idx)
 
-  # Point estimates
-  w_full     = compute_weights(df_linked, df_full)
-  d_full     = w_full$data
-  P_hat      = p_matrix(d_full, !!dad_sym, !!son_sym, matrix = TRUE)
-  rnames     = rownames(P_hat); cnames = colnames(P_hat)
-  nR         = nrow(P_hat);    nC     = ncol(P_hat)
-  pistar_hat = pi_star(P_hat)
-  d1_hat     = dobrushin(P_hat)$d1
+  w_full  = compute_weights(df_linked, df_full)
+  d_full  = w_full$data
+  P_hat1  = p_matrix(d_full, !!rlang::sym(dad_nm1), !!rlang::sym(son_nm1), matrix = TRUE)
+  P_hat2  = p_matrix(d_full, !!rlang::sym(dad_nm2), !!rlang::sym(son_nm2), matrix = TRUE)
 
   boot_once = function() {
     fam_b = sample(fams, length(fams), replace = TRUE)
     idx   = unlist(pid_idx[fam_b], use.names = FALSE)
-    w_b   = compute_weights(df_linked[idx, ], df_full)
-    d_b   = w_b$data
-    P_b   = p_matrix(d_b, !!dad_sym, !!son_sym, matrix = TRUE)
-    list(P = P_b, pi_s = pi_star(P_b), d1 = dobrushin(P_b)$d1)
+    w_b   = tryCatch(
+      compute_weights(df_linked[idx, ], df_full),
+      error = function(e) NULL)
+    if (is.null(w_b)) return(NULL)
+    d_b  = w_b$data
+    P_b1 = tryCatch(
+      p_matrix(d_b, !!rlang::sym(dad_nm1), !!rlang::sym(son_nm1), matrix = TRUE),
+      error = function(e) NULL)
+    P_b2 = tryCatch(
+      p_matrix(d_b, !!rlang::sym(dad_nm2), !!rlang::sym(son_nm2), matrix = TRUE),
+      error = function(e) NULL)
+    if (is.null(P_b1) || is.null(P_b2)) return(NULL)
+    if (!identical(dim(P_b1), dim(P_hat1)) || !identical(dim(P_b2), dim(P_hat2))) return(NULL)
+    list(P1   = P_b1,
+         P2   = P_b2,
+         d1_1 = dobrushin(P_b1)$d1,
+         d1_2 = dobrushin(P_b2)$d1)
   }
 
-  boots = if (mc.cores > 1L) {
+  boots = if (mc.cores > 1L)
     parallel::mclapply(seq_len(R), function(i) boot_once(), mc.cores = mc.cores)
-  } else {
+  else
     lapply(seq_len(R), function(i) boot_once())
-  }
 
-  arr_P    = simplify2array(lapply(boots, `[[`, "P"))
-  mat_pi_s = do.call(rbind, lapply(boots, `[[`, "pi_s"))
-  d1_draws = sapply(boots, `[[`, "d1")
+  n_null = sum(sapply(boots, is.null))
+  if (n_null > 0)
+    message(sprintf("bootstrap: %d / %d draws discarded (dimension mismatch or model failure)",
+                    n_null, R))
+  if (n_null / R > 0.05)
+    stop(sprintf("bootstrap: %.1f%% of draws discarded — investigate before proceeding",
+                 100 * n_null / R))
+  boots = Filter(Negate(is.null), boots)
 
   lo_p = alpha / 2; hi_p = 1 - alpha / 2
 
-  P_lo = apply(arr_P, c(1, 2), quantile, probs = lo_p, na.rm = TRUE)
-  P_hi = apply(arr_P, c(1, 2), quantile, probs = hi_p, na.rm = TRUE)
-
-  list(
-    P = tibble::tibble(
-      !!dad_sym := rep(rnames, times = nC),
-      !!son_sym := rep(cnames, each  = nR),
+  summarise_pair = function(P_hat, P_key, d1_key, dad_nm, son_nm) {
+    rnames = rownames(P_hat); cnames = colnames(P_hat)
+    nR = nrow(P_hat); nC = ncol(P_hat)
+    arr_P = simplify2array(lapply(boots, `[[`, P_key))
+    P_lo = apply(arr_P, c(1, 2), quantile, probs = lo_p, na.rm = TRUE)
+    P_hi = apply(arr_P, c(1, 2), quantile, probs = hi_p, na.rm = TRUE)
+    d1_draws = sapply(boots, `[[`, d1_key)
+    tbl = tibble::tibble(
+      dad = rep(rnames, times = nC),
+      son = rep(cnames, each  = nR),
       est = as.vector(P_hat),
       lo  = as.vector(P_lo),
       hi  = as.vector(P_hi)
-    ),
-    pi_s = tibble::tibble(
-      state = names(pistar_hat),
-      est   = as.numeric(pistar_hat),
-      lo    = apply(mat_pi_s, 2, quantile, probs = lo_p, na.rm = TRUE),
-      hi    = apply(mat_pi_s, 2, quantile, probs = hi_p, na.rm = TRUE)
-    ),
-    d1 = c(
-      est = d1_hat,
-      lo  = quantile(d1_draws, lo_p, na.rm = TRUE),
-      hi  = quantile(d1_draws, hi_p, na.rm = TRUE)
     )
+    names(tbl)[1:2] = c(dad_nm, son_nm)
+    list(
+      P  = tbl,
+      d1 = c(est = dobrushin(P_hat)$d1,
+             lo  = quantile(d1_draws, lo_p, na.rm = TRUE),
+             hi  = quantile(d1_draws, hi_p, na.rm = TRUE))
+    )
+  }
+
+  list(
+    macro = summarise_pair(P_hat1, "P1", "d1_1", dad_nm1, son_nm1),
+    meso  = summarise_pair(P_hat2, "P2", "d1_2", dad_nm2, son_nm2)
   )
 }
 
@@ -635,13 +662,14 @@ boot_regional_cf = function(
       Pb = p_matrix(db, !!dad_sym, !!son_sym)
       Pk = p_matrix(dk, !!dad_sym, !!son_sym)
       if (!all(rownames(Pb) %in% rownames(Pk)))
-        return(c(regime = NA_real_, comp = NA_real_, total = NA_real_))
+        return(c(regime = NA_real_, comp = NA_real_, total = NA_real_, d1_k = NA_real_))
       Pk   = Pk[rownames(Pb), colnames(Pb), drop = FALSE]
       pk   = pi_0(dk, !!dad_sym)
       pb   = pi_0(db, !!dad_sym)
       c(regime = sdm1(pk, Pk, pk, Pb),
         comp   = sdm1(pk, Pb, pb, Pb),
-        total  = sdm1(pk, Pk, pb, Pb))
+        total  = sdm1(pk, Pk, pb, Pb),
+        d1_k   = dobrushin(Pk)$d1)
     }
 
     boots = if (mc.cores > 1L)
@@ -663,7 +691,8 @@ boot_regional_cf = function(
       comp      = comp_hat,
       comp_lo   = q("comp",   lo_p), comp_hi   = q("comp",   hi_p),
       total     = total_hat,
-      total_lo  = q("total",  lo_p), total_hi  = q("total",  hi_p)
+      total_lo  = q("total",  lo_p), total_hi  = q("total",  hi_p),
+      d1_lo     = q("d1_k",   lo_p), d1_hi     = q("d1_k",   hi_p)
     )
   })
 }
@@ -798,16 +827,6 @@ regional_counterfactuals = function(regional_data,
   })
 }
 
-# --- Long-format matrix helper ---
-# Converts a point-estimate matrix to the same tibble format as boot_pmatrix_ci()
-# output (se = NA), so it can be passed directly to plot_pmat().
-
-pmat_long = function(P, dad_nm = "dad", son_nm = "son") {
-  rn = rownames(P); cn = colnames(P)
-  expand.grid(setNames(list(rn, cn), c(dad_nm, son_nm)),
-              stringsAsFactors = FALSE) |>
-    dplyr::mutate(est = as.vector(t(P)), se = NA_real_)
-}
 
 # --- State FIPS to region lookup (1940 boundaries) ---
 
@@ -833,8 +852,8 @@ state_fips_1940 = tibble::tibble(
 
 # --- Plot helpers ---
 
-# Heatmap for a transition matrix. boot_df is the tibble from boot_pmatrix_ci()
-# or pmat_long(). If se is non-NA, labels show "est\n(se)"; otherwise just "est".
+# Heatmap for a transition matrix. boot_df is the tibble from boot_pmatrix_ci_pair()$macro
+# or $meso ($P element). If lo/hi columns are present, labels show "est\n[lo,hi]".
 plot_pmat = function(boot_df, dad_var, son_var,
                      levels = NULL, text_size = 5.5, title_expr = "P") {
   dad_sym = rlang::ensym(dad_var)
@@ -846,13 +865,13 @@ plot_pmat = function(boot_df, dad_var, son_var,
       dplyr::mutate(!!dad_sym := factor(!!dad_sym, levels = levels),
                     !!son_sym := factor(!!son_sym, levels = rev(levels)))
   }
-  has_se = !all(is.na(plot_df$se))
+  has_ci = "lo" %in% names(plot_df) && !all(is.na(plot_df$lo))
 
   ggplot2::ggplot(plot_df, ggplot2::aes(x = !!son_sym, y = !!dad_sym, fill = est)) +
     ggplot2::geom_tile(color = "white", linewidth = 0.8) +
     ggplot2::geom_text(
-      ggplot2::aes(label = if (has_se)
-                     sprintf("%.2f\n(%.3f)", est, se)
+      ggplot2::aes(label = if (has_ci)
+                     sprintf("%.2f\n[%.2f,%.2f]", est, lo, hi)
                    else
                      sprintf("%.2f", est)),
       vjust = 0.3, size = text_size) +

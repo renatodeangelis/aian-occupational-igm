@@ -1,13 +1,15 @@
 library(dplyr)
 library(readr)
 library(cobalt)
-library(ggplot2)
 
 source("code/00_utils.R")
+
+dir.create("data", showWarnings = FALSE, recursive = TRUE)
 
 aian_merged = readRDS("data/aian_merged.rds") |>
   mutate(region    = assign_region(statefip_1940),
          education = classify_education(educd_1940))
+stopifnot("NA region found — check assign_region() coverage" = !any(is.na(aian_merged$region)))
 
 aian_full = read_csv(
   file = "https://www.dropbox.com/scl/fi/ouj5rods7i1a0jomyk7ec/usa_00027.csv?rlkey=az0lfp12oqk82b9p1uf5nk309&st=lxmzjue2&dl=1") |>
@@ -71,6 +73,9 @@ bt = bal.tab(linked ~ cohort + region + education + urban_1940,
 cat("\n--- Covariate balance (untrimmed weights) ---\n")
 print(bt)
 dir.create("output", showWarnings = FALSE)
+readr::write_csv(
+  tibble::rownames_to_column(bt$Balance, "covariate"),
+  "output/balance_table.csv")
 
 bt_state = bal.tab(linked ~ statefip_1940,
                    data = aian_comb_bal, weights = "w_atc_norm",
@@ -85,6 +90,9 @@ if (any(abs(state_smds) > 0.2)) {
   cat("WARNING: States with |SMD| > 0.2:",
       paste(bad_states, collapse = ", "), "\n")
 }
+readr::write_csv(
+  tibble::rownames_to_column(bt_state$Balance, "state_fip"),
+  "output/balance_table_state.csv")
 
 # --- Finalize and write ---
 aian_ps = aian_ps |>

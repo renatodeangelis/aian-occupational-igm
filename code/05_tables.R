@@ -1,18 +1,22 @@
 ################################################################################
-# 06_tables.R
+# 05_tables.R
 # LaTeX tables for slides 8 and meso summary.
 #
 # §1  Regional table (shaded LaTeX tabular)
 # §2  Meso summary table
 # §3  Zero-cell check and Blume-style ε perturbation
+# §4  Relief cross-tab (farm origin × employment status)
 #
 # Reads:  output/estimates.rds
 # Writes: output/figures/slide08_regional_table.tex
 #         output/figures/slide08_zero_cell_check.tex
+#         output/figures/relief_xtab_global.tex
+#         output/figures/relief_xtab_regional.tex
 #         (meso table printed to console for copy-paste into .tex)
 ################################################################################
 
 library(dplyr)
+library(tidyr)
 library(knitr)
 
 source("code/00_utils.R")
@@ -35,11 +39,7 @@ steady_meso      = est$steady_meso
 # booktabs + colortbl.
 ################################################################################
 
-# South is excluded from regional comparison (OCC1950 100 conflates owner and
-# tenant farmers; tenancy dominated in the South).
-regions_cf = setdiff(regions_list, "south")
-
-tbl = do.call(rbind, lapply(regions_cf, function(r) {
+tbl = do.call(rbind, lapply(regions_list, function(r) {
   g  = regional_results[[r]]
   cf = reg_cf[reg_cf$region == r, ]
   cb = reg_cf_boot[reg_cf_boot$region == r, ]
@@ -53,6 +53,12 @@ tbl = do.call(rbind, lapply(regions_cf, function(r) {
     relief_lower  = g$relief_lower,
     relief_upper  = g$relief_upper,
     d1            = g$d1,
+    d1_row1       = g$d1_row1,
+    d1_row2       = g$d1_row2,
+    d1_lo         = cb$d1_lo,
+    d1_hi         = cb$d1_hi,
+    ess           = g$ess,
+    farmwkr_share_pop = g$farmwkr_share_pop,
     regime        = cf$regime,
     regime_lo     = cb$regime_lo,
     regime_hi     = cb$regime_hi,
@@ -98,16 +104,18 @@ cell_ci = function(est, lo, hi, shade = NULL) {
 }
 
 ln = character(0)
-ln = c(ln, "\\begin{tabular}{lrrrrrrrrr}")
+ln = c(ln, "\\begin{tabular}{lrrrrrrrrrrrr}")
 ln = c(ln, "\\toprule")
 ln = c(ln, paste(
   "Region", "$n$",
   "$\\pi_0^{\\text{farm}}$",
   "Farm ret.",
-  "Farmwkr.",
+  "Fwkr.$^{\\text{son}}$",
+  "Fwkr.$^{\\text{dad}}$",
   "Relief$^-$",
   "Relief$^+$",
-  "$\\delta(P)$",
+  "$\\log\\delta(P)$",
+  "Gen. pair",
   "regime$_k$",
   "comp$_k$",
   sep = " & "
@@ -121,9 +129,11 @@ for (i in seq_len(nrow(tbl))) {
     cell_sh(sh_pi0[i],    tbl$pi0_farming[i]),
     cell(tbl$farm_ret[i]),
     cell(tbl$farmwkr_share[i]),
+    cell(tbl$farmwkr_share_pop[i]),
     cell_sh(sh_rel_lo[i], tbl$relief_lower[i]),
     cell_sh(sh_rel_hi[i], tbl$relief_upper[i]),
-    cell(tbl$d1[i]),
+    cell_ci(tbl$d1[i], tbl$d1_lo[i], tbl$d1_hi[i]),
+    sprintf("%s vs %s", tbl$d1_row1[i], tbl$d1_row2[i]),
     cell_ci(tbl$regime[i], tbl$regime_lo[i], tbl$regime_hi[i], sh_regime[i]),
     cell_ci(tbl$comp[i],   tbl$comp_lo[i],   tbl$comp_hi[i],   sh_comp[i]),
     sep = " & "
@@ -245,3 +255,105 @@ cl = c(cl, sprintf(paste(
 
 writeLines(cl, "output/figures/slide08_zero_cell_check.tex")
 cat("Wrote output/figures/slide08_zero_cell_check.tex\n")
+
+################################################################################
+# §4 RELIEF CROSS-TAB
+# Weighted cross-tab of sons' macro destination × 1940 employment status,
+# conditional on farm origin. Row percentages; n column = unweighted farm-origin
+# sons in that destination row.
+#
+# Column order: at_work | emergency | unemployed | other | na | n
+# Rows: macro_order (nonemp, nonmanual, manual, farming).
+#
+# Caller must load booktabs. Use \input{} to embed in paper.
+################################################################################
+
+relief_xtab_global   = est$relief_xtab_global
+relief_xtab_regional = est$relief_xtab_regional
+
+col_order  = c("at_work", "emergency", "unemployed", "other", "na")
+col_labels = c("At work", "Emergency", "Unemployed", "Other", "Missing")
+row_order  = c("nonemp", "nonmanual", "manual", "farming")
+row_labels = c("Non-employed", "Non-manual", "Manual", "Farming")
+
+fmt_pct = function(x) sprintf("%.3f", x)
+
+format_relief_tex = function(xtab, title_str = NULL) {
+  wide = tidyr::pivot_wider(xtab,
+                             id_cols    = c(macro_son, n_row),
+                             names_from = emp_cat,
+                             values_from = row_pct)
+  wide = wide[match(row_order, wide$macro_son), ]
+
+  ln = character(0)
+  if (!is.null(title_str))
+    ln = c(ln, sprintf("%% %s", title_str))
+  ln = c(ln, "\\begin{tabular}{lrrrrrrr}")
+  ln = c(ln, "\\toprule")
+  ln = c(ln, paste(
+    c("Destination", col_labels, "$n$"),
+    collapse = " & "
+  ), "\\\\")
+  ln = c(ln, "\\midrule")
+
+  for (i in seq_len(nrow(wide))) {
+    dest = row_labels[match(wide$macro_son[i], row_order)]
+    vals = sapply(col_order, function(cc) {
+      v = wide[[cc]][i]
+      if (is.na(v)) "---" else fmt_pct(v)
+    })
+    n   = format(wide$n_row[i], big.mark = ",", trim = TRUE)
+    ln = c(ln, paste(c(dest, vals, n), collapse = " & "), "\\\\")
+  }
+
+  ln = c(ln, "\\bottomrule")
+  ln = c(ln, "\\end{tabular}")
+  ln
+}
+
+# Global table
+gl = format_relief_tex(relief_xtab_global, "Relief cross-tab — global")
+writeLines(gl, "output/figures/relief_xtab_global.tex")
+cat("Wrote output/figures/relief_xtab_global.tex\n")
+
+# Regional table — stacked panels separated by \midrule
+reg_lines = character(0)
+reg_lines = c(reg_lines, "% Relief cross-tab — per region (farm origin only)")
+reg_lines = c(reg_lines, "\\begin{tabular}{llrrrrrrr}")
+reg_lines = c(reg_lines, "\\toprule")
+reg_lines = c(reg_lines, paste(
+  c("Region", "Destination", col_labels, "$n$"),
+  collapse = " & "
+), "\\\\")
+reg_lines = c(reg_lines, "\\midrule")
+
+for (ri in seq_along(compare_regions)) {
+  r    = compare_regions[ri]
+  disp = region_display[r]
+  xtab = relief_xtab_regional[[r]]
+  wide = tidyr::pivot_wider(xtab,
+                             id_cols     = c(macro_son, n_row),
+                             names_from  = emp_cat,
+                             values_from = row_pct)
+  wide = wide[match(row_order, wide$macro_son), ]
+
+  for (i in seq_len(nrow(wide))) {
+    dest = row_labels[match(wide$macro_son[i], row_order)]
+    reg_label = if (i == 1) disp else ""
+    vals = sapply(col_order, function(cc) {
+      v = wide[[cc]][i]
+      if (is.na(v)) "---" else fmt_pct(v)
+    })
+    n = format(wide$n_row[i], big.mark = ",", trim = TRUE)
+    reg_lines = c(reg_lines,
+                  paste(c(reg_label, dest, vals, n), collapse = " & "), "\\\\")
+  }
+  if (ri < length(compare_regions))
+    reg_lines = c(reg_lines, "\\midrule")
+}
+
+reg_lines = c(reg_lines, "\\bottomrule")
+reg_lines = c(reg_lines, "\\end{tabular}")
+
+writeLines(reg_lines, "output/figures/relief_xtab_regional.tex")
+cat("Wrote output/figures/relief_xtab_regional.tex\n")

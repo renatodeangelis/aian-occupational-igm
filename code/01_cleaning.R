@@ -5,6 +5,8 @@ library(janitor)
 
 source("code/00_utils.R")
 
+dir.create("data", showWarnings = FALSE, recursive = TRUE)
+
 aian = 3
 pop_years = c(1900, 1910, 1920, 1930, 1940)
 son_years = c(1900, 1910, 1920, 1930, 1940, 1950)
@@ -172,9 +174,17 @@ aian_age = aian_clean |>
 modal_meso_pop = pick_modal_meso(aian_clean, aian_age, prefer_employed = FALSE, empstatd_tiebreak = FALSE) |>
   rename(meso_pop = meso, picked_year = year)
 
+k_pop_tbl = aian_clean |>
+  dplyr::transmute(
+    pid,
+    k_pop = rowSums(!is.na(dplyr::pick(dplyr::matches("^occ1950_pop_\\d{4}$"))))
+  ) |>
+  dplyr::distinct(pid, .keep_all = TRUE)
+
 aian_merged = aian_clean |>
   left_join(modal_meso_pop, by = "pid") |>
   left_join(aian_age |> select(pid, birthyr_spread = spread, spread_mad), by = "pid") |>
+  left_join(k_pop_tbl, by = "pid") |>
   mutate(birthyr_son = 1940 - age_1940) |>
   select(-starts_with("age"), -starts_with("occ1950_pop")) |>
   filter(!is.na(meso_pop)) |>
@@ -202,6 +212,7 @@ aian_merged = aian_clean |>
   relocate(birthyr_spread, .after = birthyr_pop) |>
   relocate(spread_mad, .after = birthyr_spread) |>
   relocate(spread_flag, .after = spread_mad) |>
+  relocate(k_pop, .after = spread_flag) |>
   relocate(meso_pop, .after = picked_year) |>
   relocate(macro_pop, .after = meso_pop) |>
   relocate(occ_pop, .after = macro_pop) |>
